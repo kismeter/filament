@@ -75,6 +75,12 @@ public:
 
     void close() { mClosed = true; }
 
+    void enableSidebar(int width) {
+        if (mSidebarWidth != width) {
+            mSidebarWidth = width;
+        }
+    }
+
     FilamentApp(const FilamentApp& rhs) = delete;
     FilamentApp(FilamentApp&& rhs) = delete;
     FilamentApp& operator=(const FilamentApp& rhs) = delete;
@@ -201,6 +207,7 @@ private:
     filament::MaterialInstance* mDepthMI = nullptr;
     std::unique_ptr<filagui::ImGuiHelper> mImGuiHelper;
     AnimCallback mAnimation;
+    int mSidebarWidth = 0;
 };
 
 #endif // TNT_FILAMENT_SAMPLE_FILAMENTAPP_H
