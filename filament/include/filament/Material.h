@@ -24,7 +24,7 @@
 #include <filament/Texture.h>
 #include <filament/TextureSampler.h>
 
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 
 #include <utils/compiler.h>
 #include <utils/CString.h>
@@ -51,12 +51,12 @@ public:
     using VertexDomain = filament::VertexDomain;
     using TransparencyMode = filament::TransparencyMode;
 
-    using ParameterType = filament::driver::UniformType;
-    using Precision = filament::driver::Precision;
-    using SamplerType = filament::driver::SamplerType;
-    using SamplerFormat = filament::driver::SamplerFormat;
-    using CullingMode = filament::driver::CullingMode;
-    using ShaderModel = filament::driver::ShaderModel;
+    using ParameterType = filament::backend::UniformType;
+    using Precision = filament::backend::Precision;
+    using SamplerType = filament::backend::SamplerType;
+    using SamplerFormat = filament::backend::SamplerFormat;
+    using CullingMode = filament::backend::CullingMode;
+    using ShaderModel = filament::backend::ShaderModel;
 
     /**
      * Holds information about a material parameter.
@@ -137,6 +137,9 @@ public:
     //! Returns the vertex domain of this material.
     VertexDomain getVertexDomain() const noexcept;
 
+    //! Returns the material domain of this material.
+    MaterialDomain getMaterialDomain() const noexcept;
+
     //! Returns the culling mode of this material.
     CullingMode getCullingMode() const noexcept;
 
@@ -162,6 +165,15 @@ public:
     //! Indicates whether this material uses the shadowing factor as a color multiplier.
     //! This values only makes sense when the shading mode is unlit.
     bool hasShadowMultiplier() const noexcept;
+
+    //! Indicates whether this material has specular anti-aliasing enabled
+    bool hasSpecularAntiAliasing() const noexcept;
+
+    //! Returns the screen-space variance for specular-antialiasing, this value is between 0 and 1.
+    float getSpecularAntiAliasingVariance() const noexcept;
+
+    //! Returns the clamping threshold for specular-antialiasing, this value is between 0 and 1.
+    float getSpecularAntiAliasingThreshold() const noexcept;
 
     //! Returns the list of vertex attributes required by this material.
     AttributeBitset getRequiredAttributes() const noexcept;
@@ -222,7 +234,7 @@ public:
      *
      * @see getDefaultInstance()
      */
-    void setDefaultParameter(const char* name, RgbType type, filament::math::float3 color) noexcept {
+    void setDefaultParameter(const char* name, RgbType type, math::float3 color) noexcept {
         getDefaultInstance()->setParameter(name, type, color);
     }
 
@@ -235,7 +247,7 @@ public:
      *
      * @see getDefaultInstance()
      */
-    void setDefaultParameter(const char* name, RgbaType type, filament::math::float4 color) noexcept {
+    void setDefaultParameter(const char* name, RgbaType type, math::float4 color) noexcept {
         getDefaultInstance()->setParameter(name, type, color);
     }
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.10)
 project(SPIRV-Cross)
 
 # Use assertions instead of exceptions so we can succesfully compile with -fno-exceptions.
@@ -71,9 +71,15 @@ endmacro()
 spirv_cross_add_library(spirv-cross-core spirv_cross_core STATIC
     ../GLSL.std.450.h
     ../spirv_common.hpp
+    ../spirv_cross_containers.hpp
+    ../spirv_cross_error_handling.hpp
     ../spirv.hpp
     ../spirv_cross.hpp
     ../spirv_cross.cpp
+    ../spirv_parser.hpp
+    ../spirv_parser.cpp
+    ../spirv_cross_parsed_ir.hpp
+    ../spirv_cross_parsed_ir.cpp
     ../spirv_cfg.hpp
     ../spirv_cfg.cpp)
 

@@ -78,7 +78,7 @@ public:
      * @param color     Array of read, green, blue channels values.
      * @throws utils::PreConditionPanic if name doesn't exist or no-op if exceptions are disabled.
      */
-    void setParameter(const char* name, RgbType type, filament::math::float3 color) noexcept;
+    void setParameter(const char* name, RgbType type, math::float3 color) noexcept;
 
     /**
      * Set an RGBA color as the named parameter.
@@ -89,7 +89,7 @@ public:
      * @param color     Array of read, green, blue and alpha channels values.
      * @throws utils::PreConditionPanic if name doesn't exist or no-op if exceptions are disabled.
      */
-    void setParameter(const char* name, RgbaType type, filament::math::float4 color) noexcept;
+    void setParameter(const char* name, RgbaType type, math::float4 color) noexcept;
 
     /**
      * Set up a custom scissor rectangle; by default this encompasses the View.
@@ -120,9 +120,36 @@ public:
      *  absolutely necessary.
      *
      * @param scale scale factor used to create a variable depth offset for each triangle
-     * @param constant scale factore used to create a constant depth offset for each triangle
+     * @param constant scale factor used to create a constant depth offset for each triangle
      */
     void setPolygonOffset(float scale, float constant) noexcept;
+
+    /**
+     * Overrides the minimum alpha value a fragment must have to not be discarded when the blend
+     * mode is MASKED. Defaults to 0.4 if it has not been set in the parent Material. The specified
+     * value should be between 0 and 1 and will be clamped if necessary.
+     */
+    void setMaskThreshold(float threshold) noexcept;
+
+    /**
+     * Sets the screen space variance of the filter kernel used when applying specular
+     * anti-aliasing. The default value is set to 0.15. The specified value should be between
+     * 0 and 1 and will be clamped if necessary.
+     */
+    void setSpecularAntiAliasingVariance(float variance) noexcept;
+
+    /**
+     * Sets the clamping threshold used to suppress estimation errors when applying specular
+     * anti-aliasing. The default value is set to 0.2. The specified value should be between 0
+     * and 1 and will be clamped if necessary.
+     */
+    void setSpecularAntiAliasingThreshold(float threshold) noexcept;
+
+    /**
+     * Enables or disables double-sided lighting if the parent Material has double-sided capability,
+     * otherwise prints a warning.
+     */
+    void setDoubleSided(bool doubleSided) noexcept;
 };
 
 } // namespace filament

@@ -18,7 +18,7 @@
 #define TNT_FILAMENT_SAMPLERINTERFACEBLOCK_H
 
 
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 
 #include <utils/compiler.h>
 #include <utils/CString.h>
@@ -38,10 +38,10 @@ public:
     SamplerInterfaceBlock& operator=(SamplerInterfaceBlock&& rhs) /*noexcept*/;
     ~SamplerInterfaceBlock() noexcept;
 
-    using Type = driver::SamplerType;
-    using Format = driver::SamplerFormat;
-    using Precision = driver::Precision;
-    using SamplerParams = driver::SamplerParams;
+    using Type = backend::SamplerType;
+    using Format = backend::SamplerFormat;
+    using Precision = backend::Precision;
+    using SamplerParams = backend::SamplerParams;
 
     class Builder {
     public:

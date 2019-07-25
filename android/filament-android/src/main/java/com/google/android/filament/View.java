@@ -32,6 +32,8 @@ public class View {
     private DynamicResolutionOptions mDynamicResolution;
     private RenderQuality mRenderQuality;
     private DepthPrepass mDepthPrepass = DepthPrepass.DEFAULT;
+    private AmbientOcclusionOptions mAmbientOcclusionOptions;
+    private RenderTarget mRenderTarget;
 
     public static class DynamicResolutionOptions {
         public boolean enabled = false;
@@ -42,6 +44,13 @@ public class View {
         public float minScale = 0.5f;
         public float maxScale = 1.0f;
         public int history = 9;
+    }
+
+    public static class AmbientOcclusionOptions {
+        public float radius = 0.3f;
+        public float bias = 0.005f;
+        public float power = 0.0f;
+        public float resolution = 0.5f;
     }
 
     public enum QualityLevel {
@@ -55,9 +64,24 @@ public class View {
         public QualityLevel hdrColorBuffer = QualityLevel.HIGH;
     }
 
+    public enum AmbientOcclusion {
+        NONE,
+        SSAO
+    }
+
     public enum AntiAliasing {
         NONE,
         FXAA
+    }
+
+    public enum ToneMapping {
+        LINEAR,
+        ACES
+    }
+
+    public enum Dithering {
+        NONE,
+        TEMPORAL
     }
 
     public enum DepthPrepass {
@@ -124,7 +148,7 @@ public class View {
 
     @NonNull @Size(min = 4)
     public float[] getClearColor(@NonNull @Size(min = 4) float[] out) {
-        out = assertFloat4(out);
+        out = Asserts.assertFloat4(out);
         nGetClearColor(getNativeObject(), out);
         return out;
     }
@@ -143,6 +167,16 @@ public class View {
         nSetShadowsEnabled(getNativeObject(), enabled);
     }
 
+    public void setRenderTarget(@Nullable RenderTarget target) {
+        mRenderTarget = target;
+        nSetRenderTarget(getNativeObject(), target != null ? target.getNativeObject() : 0);
+    }
+
+    @Nullable
+    public RenderTarget getRenderTarget() {
+        return mRenderTarget;
+    }
+
     public void setSampleCount(int count) {
         nSetSampleCount(getNativeObject(), count);
     }
@@ -158,6 +192,24 @@ public class View {
     @NonNull
     public AntiAliasing getAntiAliasing() {
         return AntiAliasing.values()[nGetAntiAliasing(getNativeObject())];
+    }
+
+    public void setToneMapping(@NonNull ToneMapping type) {
+        nSetToneMapping(getNativeObject(), type.ordinal());
+    }
+
+    @NonNull
+    public ToneMapping getToneMapping() {
+        return ToneMapping.values()[nGetToneMapping(getNativeObject())];
+    }
+
+    public void setDithering(@NonNull Dithering dithering) {
+        nSetDithering(getNativeObject(), dithering.ordinal());
+    }
+
+    @NonNull
+    public Dithering getDithering() {
+        return Dithering.values()[nGetDithering(getNativeObject())];
     }
 
     public void setDynamicResolutionOptions(@NonNull DynamicResolutionOptions options) {
@@ -224,6 +276,28 @@ public class View {
         nSetDynamicLightingOptions(getNativeObject(), zLightNear, zLightFar);
     }
 
+    public void setAmbientOcclusion(@NonNull AmbientOcclusion ao) {
+        nSetAmbientOcclusion(getNativeObject(), ao.ordinal());
+    }
+
+    @NonNull
+    public AmbientOcclusion getAmbientOcclusion() {
+        return AmbientOcclusion.values()[nGetAmbientOcclusion(getNativeObject())];
+    }
+
+    public void setAmbientOcclusionOptions(@NonNull AmbientOcclusionOptions options) {
+        mAmbientOcclusionOptions = options;
+        nSetAmbientOcclusionOptions(getNativeObject(), options.radius, options.bias, options.power, options.resolution);
+    }
+
+    @NonNull
+    public AmbientOcclusionOptions getAmbientOcclusionOptions() {
+        if (mAmbientOcclusionOptions == null) {
+            mAmbientOcclusionOptions = new AmbientOcclusionOptions();
+        }
+        return mAmbientOcclusionOptions;
+    }
+
     long getNativeObject() {
         if (mNativeObject == 0) {
             throw new IllegalStateException("Calling method on destroyed View");
@@ -235,15 +309,6 @@ public class View {
         mNativeObject = 0;
     }
 
-    @NonNull @Size(min = 4)
-    private static float[] assertFloat4(@Nullable float[] out) {
-        if (out == null) out = new float[4];
-        else if (out.length < 4) {
-            throw new ArrayIndexOutOfBoundsException("Array length must be at least 4");
-        }
-        return out;
-    }
-
     private static native void nSetName(long nativeView, String name);
     private static native void nSetScene(long nativeView, long nativeScene);
     private static native void nSetCamera(long nativeView, long nativeCamera);
@@ -253,10 +318,15 @@ public class View {
     private static native void nSetClearTargets(long nativeView, boolean color, boolean depth, boolean stencil);
     private static native void nSetVisibleLayers(long nativeView, int select, int value);
     private static native void nSetShadowsEnabled(long nativeView, boolean enabled);
+    private static native void nSetRenderTarget(long nativeView, long nativeRenderTarget);
     private static native void nSetSampleCount(long nativeView, int count);
     private static native int nGetSampleCount(long nativeView);
     private static native void nSetAntiAliasing(long nativeView, int type);
     private static native int nGetAntiAliasing(long nativeView);
+    private static native void nSetToneMapping(long nativeView, int type);
+    private static native int nGetToneMapping(long nativeView);
+    private static native void nSetDithering(long nativeView, int dithering);
+    private static native int nGetDithering(long nativeView);
     private static native void nSetDynamicResolutionOptions(long nativeView,
             boolean enabled, boolean homogeneousScaling,
             float targetFrameTimeMilli, float headRoomRatio, float scaleRate,
@@ -268,4 +338,7 @@ public class View {
     private static native boolean nIsPostProcessingEnabled(long nativeView);
     private static native void nSetFrontFaceWindingInverted(long nativeView, boolean inverted);
     private static native boolean nIsFrontFaceWindingInverted(long nativeView);
+    private static native void nSetAmbientOcclusion(long nativeView, int ordinal);
+    private static native int nGetAmbientOcclusion(long nativeView);
+    private static native void nSetAmbientOcclusionOptions(long nativeView, float radius, float bias, float power, float resolution);
 }

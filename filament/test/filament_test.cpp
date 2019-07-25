@@ -45,7 +45,7 @@ using namespace filament;
 using namespace filament::math;
 using namespace utils;
 
-static bool isGray(filament::math::float3 v) {
+static bool isGray(float3 v) {
     return v.r == v.g && v.g == v.b;
 }
 
@@ -55,7 +55,7 @@ static bool almostEqualUlps(float a, float b, int maxUlps) {
     return intDiff <= maxUlps;
 }
 
-static bool vec3eq(filament::math::float3 a, filament::math::float3 b) {
+static bool vec3eq(float3 a, float3 b) {
     return  almostEqualUlps(a.x, b.x, 1) &&
             almostEqualUlps(a.y, b.y, 1) &&
             almostEqualUlps(a.z, b.z, 1);
@@ -424,10 +424,9 @@ TEST(FilamentTest, ColorConversion) {
     EXPECT_PRED2(vec3eq, (sRGBColor{1.0f, 0.0f, 0.0f}),
             Color::toSRGB<ACCURATE>({1.0f, 0.0f, 0.0f}));
 
-    // 0.5 is > 0.5
-    EXPECT_LT((sRGBColor{0.5f, 0.0f, 0.0f}), Color::toSRGB<FAST>({0.5f, 0.0f, 0.0f}));
-    // 0.5 is > 0.5
-    EXPECT_LT((sRGBColor{0.5f, 0.0f, 0.0f}), Color::toSRGB<ACCURATE>({0.5f, 0.0f, 0.0f}));
+    EXPECT_LT((sRGBColor{0.5f, 0.0f, 0.0f}.x), Color::toSRGB<FAST>({0.5f, 0.0f, 0.0f}).x);
+
+    EXPECT_LT((sRGBColor{0.5f, 0.0f, 0.0f}.x), Color::toSRGB<ACCURATE>({0.5f, 0.0f, 0.0f}).x);
 
     EXPECT_PRED1(isGray, Color::toSRGB<FAST>(LinearColor{0.5f}));
     EXPECT_PRED1(isGray, Color::toSRGB<ACCURATE>(LinearColor{0.5f}));
@@ -443,10 +442,10 @@ TEST(FilamentTest, ColorConversion) {
     // 1.0 stays 1.0
     EXPECT_PRED2(vec3eq, (LinearColor{1.0f, 0.0f, 0.0f}), Color::toLinear<ACCURATE>({1.0f, 0.0f, 0.0f}));
 
-    // 0.5 is < 0.5
-    EXPECT_GT((LinearColor{0.5f, 0.0f, 0.0f}), Color::toLinear<FAST>({0.5f, 0.0f, 0.0f}));
-    // 0.5 is < 0.5
-    EXPECT_GT((LinearColor{0.5f, 0.0f, 0.0f}), Color::toLinear<ACCURATE>({0.5f, 0.0f, 0.0f}));
+
+    EXPECT_GT((LinearColor{0.5f, 0.0f, 0.0f}.x), Color::toLinear<FAST>({0.5f, 0.0f, 0.0f}).x);
+
+    EXPECT_GT((LinearColor{0.5f, 0.0f, 0.0f}.x), Color::toLinear<ACCURATE>({0.5f, 0.0f, 0.0f}).x);
 
     EXPECT_PRED1(isGray, Color::toLinear<FAST>(sRGBColor{0.5f}));
     EXPECT_PRED1(isGray, Color::toLinear<ACCURATE>(sRGBColor{0.5f}));

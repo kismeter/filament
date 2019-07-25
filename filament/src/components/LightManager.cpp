@@ -35,15 +35,15 @@ using namespace details;
 // ------------------------------------------------------------------------------------------------
 
 struct LightManager::BuilderDetails {
-    Type mType;
+    Type mType = Type::DIRECTIONAL;
     bool mCastShadows = false;
     bool mCastLight = true;
-    filament::math::float3 mPosition = {};
+    float3 mPosition = {};
     float mFalloff = 1.0f;
     LinearColor mColor = LinearColor{ 1.0f };
     float mIntensity = 100000.0f;
-    filament::math::float3 mDirection = { 0.0f, -1.0f, 0.0f };
-    filament::math::float2 mSpotInnerOuter = { (float)M_PI, (float)M_PI };
+    float3 mDirection = { 0.0f, -1.0f, 0.0f };
+    float2 mSpotInnerOuter = { (float)M_PI, (float)M_PI };
     float mSunAngle = 0.00951f; // 0.545° in radians
     float mSunHaloSize = 10.0f;
     float mSunHaloFalloff = 80.0f;
@@ -165,14 +165,14 @@ void FLightManager::create(const FLightManager::Builder& builder, utils::Entity 
         lightType.type = builder->mType;
         lightType.shadowCaster = builder->mCastShadows;
         lightType.lightCaster = builder->mCastLight;
-        lightType.shadowMapBits = uint8_t(std::min(15, std::ilogbf(builder->mShadowOptions.mapSize)));
 
         ShadowParams& shadowParams = manager[i].shadowParams;
-        shadowParams.shadowConstantBias = clamp(builder->mShadowOptions.constantBias, 0.0f, 2.0f);
-        shadowParams.shadowNormalBias = clamp(builder->mShadowOptions.normalBias, 0.0f, 3.0f);
-        shadowParams.shadowFar = std::max(builder->mShadowOptions.shadowFar, 0.0f);
-        shadowParams.shadowNearHint = std::max(builder->mShadowOptions.shadowNearHint, 0.0f);
-        shadowParams.shadowFarHint = std::max(builder->mShadowOptions.shadowFarHint, 0.0f);
+        shadowParams.options.mapSize        = clamp(builder->mShadowOptions.mapSize, 0u, 2048u);
+        shadowParams.options.constantBias   = clamp(builder->mShadowOptions.constantBias, 0.0f, 2.0f);
+        shadowParams.options.normalBias     = clamp(builder->mShadowOptions.normalBias, 0.0f, 3.0f);
+        shadowParams.options.shadowFar      = std::max(builder->mShadowOptions.shadowFar, 0.0f);
+        shadowParams.options.shadowNearHint = std::max(builder->mShadowOptions.shadowNearHint, 0.0f);
+        shadowParams.options.shadowFarHint  = std::max(builder->mShadowOptions.shadowFarHint, 0.0f);
 
         // set default values by calling the setters
         setLocalPosition(i, builder->mPosition);
@@ -190,7 +190,7 @@ void FLightManager::create(const FLightManager::Builder& builder, utils::Entity 
     }
 }
 
-void FLightManager::prepare(driver::DriverApi& driver) const noexcept {
+void FLightManager::prepare(backend::DriverApi& driver) const noexcept {
 }
 
 void FLightManager::destroy(utils::Entity e) noexcept {
@@ -215,7 +215,7 @@ void FLightManager::terminate() noexcept {
     }
 }
 
-void FLightManager::setLocalPosition(Instance i, const filament::math::float3& position) noexcept {
+void FLightManager::setLocalPosition(Instance i, const float3& position) noexcept {
     assert(i);
     auto& manager = mManager;
     manager[i].position = position;
@@ -427,6 +427,14 @@ float LightManager::getSunHaloFalloff(Instance i) const noexcept {
 
 LightManager::Type LightManager::getType(LightManager::Instance i) const noexcept {
     return upcast(this)->getType(i);
+}
+
+const LightManager::ShadowOptions& LightManager::getShadowOptions(Instance i) const noexcept {
+    return upcast(this)->getShadowOptions(i);
+}
+
+void LightManager::setShadowOptions(Instance i, ShadowOptions const& options) noexcept {
+    upcast(this)->setShadowOptions(i, options);
 }
 
 } // namespace filament

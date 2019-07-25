@@ -23,16 +23,16 @@
 #include <android/bitmap.h>
 #endif
 
-#include <filament/driver/BufferDescriptor.h>
+#include <backend/BufferDescriptor.h>
 #include <filament/Engine.h>
 #include <filament/Stream.h>
 #include <filament/Texture.h>
 
-#include "CallbackUtils.h"
-#include "NioUtils.h"
+#include "common/CallbackUtils.h"
+#include "common/NioUtils.h"
 
 using namespace filament;
-using namespace driver;
+using namespace backend;
 
 static size_t getTextureDataSize(const Texture *texture, size_t level,
         Texture::Format format, Texture::Type type, size_t stride, size_t alignment) {
@@ -107,10 +107,10 @@ Java_com_google_android_filament_Texture_nBuilderFormat(JNIEnv*, jclass,
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_google_android_filament_Texture_nBuilderRgbm(JNIEnv*, jclass,
-        jlong nativeBuilder, jboolean enable) {
+Java_com_google_android_filament_Texture_nBuilderUsage(JNIEnv*, jclass,
+        jlong nativeBuilder, jint flags) {
     Texture::Builder *builder = (Texture::Builder *) nativeBuilder;
-    builder->rgbm(enable);
+    builder->usage((Texture::Usage) flags);
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -163,12 +163,6 @@ Java_com_google_android_filament_Texture_nGetInternalFormat(JNIEnv*, jclass,
     return (jint) texture->getFormat();
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_google_android_filament_Texture_nGetRgbm(JNIEnv*, jclass, jlong nativeTexture) {
-    Texture *texture = (Texture *) nativeTexture;
-    return static_cast<jboolean>(texture->isRgbm());
-}
-
 extern "C" JNIEXPORT jint JNICALL
 Java_com_google_android_filament_Texture_nSetImage(JNIEnv* env, jclass, jlong nativeTexture,
         jlong nativeEngine, jint level, jint xoffset, jint yoffset, jint width, jint height,
@@ -191,8 +185,8 @@ Java_com_google_android_filament_Texture_nSetImage(JNIEnv* env, jclass, jlong na
     void *buffer = nioBuffer.getData();
     auto *callback = JniBufferCallback::make(engine, env, handler, runnable, std::move(nioBuffer));
 
-    Texture::PixelBufferDescriptor desc(buffer, sizeInBytes, (driver::PixelDataFormat) format,
-            (driver::PixelDataType) type, (uint8_t) alignment, (uint32_t) left, (uint32_t) bottom,
+    Texture::PixelBufferDescriptor desc(buffer, sizeInBytes, (backend::PixelDataFormat) format,
+            (backend::PixelDataType) type, (uint8_t) alignment, (uint32_t) left, (uint32_t) bottom,
             (uint32_t) stride, &JniBufferCallback::invoke, callback);
 
     texture->setImage(*engine, (size_t) level, (uint32_t) xoffset, (uint32_t) yoffset,
@@ -223,7 +217,7 @@ Java_com_google_android_filament_Texture_nSetImageCompressed(JNIEnv *env, jclass
     auto *callback = JniBufferCallback::make(engine, env, handler, runnable, std::move(nioBuffer));
 
     Texture::PixelBufferDescriptor desc(buffer, sizeInBytes,
-            (driver::CompressedPixelDataType) compressedFormat, (uint32_t) compressedSizeInBytes,
+            (backend::CompressedPixelDataType) compressedFormat, (uint32_t) compressedSizeInBytes,
             &JniBufferCallback::invoke, callback);
 
     texture->setImage(*engine, (size_t) level, (uint32_t) xoffset, (uint32_t) yoffset,
@@ -258,8 +252,8 @@ Java_com_google_android_filament_Texture_nSetImageCubemap(JNIEnv *env, jclass,
     void *buffer = nioBuffer.getData();
     auto *callback = JniBufferCallback::make(engine, env, handler, runnable, std::move(nioBuffer));
 
-    Texture::PixelBufferDescriptor desc(buffer, sizeInBytes, (driver::PixelDataFormat) format,
-            (driver::PixelDataType) type, (uint8_t) alignment, (uint32_t) left, (uint32_t) bottom,
+    Texture::PixelBufferDescriptor desc(buffer, sizeInBytes, (backend::PixelDataFormat) format,
+            (backend::PixelDataType) type, (uint8_t) alignment, (uint32_t) left, (uint32_t) bottom,
             (uint32_t) stride, &JniBufferCallback::invoke, callback);
 
     texture->setImage(*engine, (size_t) level, std::move(desc), faceOffsets);
@@ -294,7 +288,7 @@ Java_com_google_android_filament_Texture_nSetImageCubemapCompressed(JNIEnv *env,
     auto *callback = JniBufferCallback::make(engine, env, handler, runnable, std::move(nioBuffer));
 
     Texture::PixelBufferDescriptor desc(buffer, sizeInBytes,
-            (driver::CompressedPixelDataType) compressedFormat, (uint32_t) compressedSizeInBytes,
+            (backend::CompressedPixelDataType) compressedFormat, (uint32_t) compressedSizeInBytes,
             &JniBufferCallback::invoke, callback);
 
     texture->setImage(*engine, (size_t) level, std::move(desc), faceOffsets);
@@ -333,6 +327,48 @@ Java_com_google_android_filament_Texture_nIsStreamValidForTexture(JNIEnv*, jclas
         jlong nativeTexture, jlong) {
     Texture* texture = (Texture*) nativeTexture;
     return (jboolean) (texture->getTarget() == SamplerType::SAMPLER_EXTERNAL);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_google_android_filament_Texture_nGeneratePrefilterMipmap(JNIEnv *env, jclass,
+        jlong nativeTexture, jlong nativeEngine, jint width, jint height,
+        jobject storage, jint remaining, jint left,
+        jint top, jint type, jint alignment, jint stride, jint format,
+        jintArray faceOffsetsInBytes_, jobject handler, jobject runnable, jint sampleCount,
+        jboolean mirror) {
+
+    Texture *texture = (Texture *) nativeTexture;
+    Engine *engine = (Engine *) nativeEngine;
+
+    jint *faceOffsetsInBytes = env->GetIntArrayElements(faceOffsetsInBytes_, NULL);
+    Texture::FaceOffsets faceOffsets;
+    std::copy_n(faceOffsetsInBytes, 6, faceOffsets.offsets);
+    env->ReleaseIntArrayElements(faceOffsetsInBytes_, faceOffsetsInBytes, JNI_ABORT);
+
+    stride = stride ? stride : width;
+    size_t sizeInBytes = 6 *
+                         Texture::computeTextureDataSize((Texture::Format) format, (Texture::Type) type,
+                                 (size_t) stride, (size_t) height, (size_t) alignment);
+
+    AutoBuffer nioBuffer(env, storage, 0);
+    if (sizeInBytes > (remaining << nioBuffer.getShift())) {
+        // BufferOverflowException
+        return -1;
+    }
+
+    void *buffer = nioBuffer.getData();
+    auto *callback = JniBufferCallback::make(engine, env, handler, runnable, std::move(nioBuffer));
+
+    Texture::PixelBufferDescriptor desc(buffer, sizeInBytes, (backend::PixelDataFormat) format,
+            (backend::PixelDataType) type, (uint8_t) alignment, (uint32_t)0, (uint32_t)0,
+            (uint32_t) stride, &JniBufferCallback::invoke, callback);
+
+    Texture::PrefilterOptions options;
+    options.sampleCount = sampleCount;
+    options.mirror = mirror;
+    texture->generatePrefilterMipmap(*engine, std::move(desc), faceOffsets, &options);
+
+    return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

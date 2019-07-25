@@ -19,7 +19,7 @@
 
 #include "upcast.h"
 
-#include "driver/DriverApiForward.h"
+#include "private/backend/DriverApiForward.h"
 
 #include <filament/LightManager.h>
 
@@ -57,7 +57,7 @@ public:
 
     void destroy(utils::Entity e) noexcept;
 
-    void prepare(driver::DriverApi& driver) const noexcept;
+    void prepare(backend::DriverApi& driver) const noexcept;
 
     void gc(utils::EntityManager& em) noexcept {
         mManager.gc(em);
@@ -65,7 +65,6 @@ public:
 
     struct LightType {
         Type type : 3;
-        uint8_t shadowMapBits : 4;
         bool shadowCaster : 1;
         bool lightCaster : 1;
     };
@@ -75,19 +74,15 @@ public:
         float cosOuterSquared = 1;
         float sinInverse = std::numeric_limits<float>::infinity();
         float luminousPower = 0;
-        filament::math::float2 scaleOffset = {};
+        math::float2 scaleOffset = {};
     };
 
     struct ShadowParams {
-        float shadowConstantBias;
-        float shadowNormalBias;
-        float shadowFar;
-        float shadowNearHint;
-        float shadowFarHint;
+        LightManager::ShadowOptions options;
     };
 
-    UTILS_NOINLINE void setLocalPosition(Instance i, const filament::math::float3& position) noexcept;
-    UTILS_NOINLINE void setLocalDirection(Instance i, filament::math::float3 direction) noexcept;
+    UTILS_NOINLINE void setLocalPosition(Instance i, const math::float3& position) noexcept;
+    UTILS_NOINLINE void setLocalDirection(Instance i, math::float3 direction) noexcept;
     UTILS_NOINLINE void setColor(Instance i, const LinearColor& color) noexcept;
     UTILS_NOINLINE void setSpotLightCone(Instance i, float inner, float outer) noexcept;
     UTILS_NOINLINE void setIntensity(Instance i, float intensity) noexcept;
@@ -135,7 +130,7 @@ public:
     }
 
     constexpr uint32_t getShadowMapSize(Instance i) const noexcept {
-        return 1u << getLightType(i).shadowMapBits;
+        return getShadowParams(i).options.mapSize;
     }
 
     constexpr ShadowParams const& getShadowParams(Instance i) const noexcept {
@@ -143,18 +138,18 @@ public:
     }
 
     constexpr float getShadowConstantBias(Instance i) const noexcept {
-        return getShadowParams(i).shadowConstantBias;
+        return getShadowParams(i).options.constantBias;
     }
 
     constexpr float getShadowNormalBias(Instance i) const noexcept {
-        return getShadowParams(i).shadowNormalBias;
+        return getShadowParams(i).options.normalBias;
     }
 
     constexpr float getShadowFar(Instance i) const noexcept {
-        return getShadowParams(i).shadowFar;
+        return getShadowParams(i).options.shadowFar;
     }
 
-    constexpr const filament::math::float3& getColor(Instance i) const noexcept {
+    constexpr const math::float3& getColor(Instance i) const noexcept {
         return mManager[i].color;
     }
 
@@ -194,12 +189,20 @@ public:
         return getSpotParams(i).radius;
     }
 
-    constexpr const filament::math::float3& getLocalPosition(Instance i) const noexcept {
+    constexpr const math::float3& getLocalPosition(Instance i) const noexcept {
         return mManager[i].position;
     }
 
-    constexpr const filament::math::float3& getLocalDirection(Instance i) const noexcept {
+    constexpr const math::float3& getLocalDirection(Instance i) const noexcept {
         return mManager[i].direction;
+    }
+
+    const ShadowOptions& getShadowOptions(Instance i) const noexcept {
+        return getShadowParams(i).options;
+    }
+
+    void setShadowOptions(Instance i, ShadowOptions const& options) noexcept {
+        static_cast<ShadowParams&>(mManager[i].shadowParams).options = options;
     }
 
 private:
@@ -221,9 +224,9 @@ private:
 
     using Base = utils::SingleInstanceComponentManager<  // 120 bytes
             LightType,      //  1
-            filament::math::float3,   // 12
-            filament::math::float3,   // 12
-            filament::math::float3,   // 12
+            math::float3,   // 12
+            math::float3,   // 12
+            math::float3,   // 12
             ShadowParams,   // 12
             SpotParams,     // 24
             float,          //  4

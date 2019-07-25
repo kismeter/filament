@@ -21,10 +21,20 @@
 #include <filament/Material.h>
 
 #include <gltfio/FilamentAsset.h>
+#include <gltfio/MaterialProvider.h>
 
-#include <utils/NameComponentManager.h>
+namespace utils {
+    class NameComponentManager;
+}
 
 namespace gltfio {
+
+struct AssetConfiguration {
+    class filament::Engine* engine;
+    MaterialProvider* materials;
+    utils::NameComponentManager* names = nullptr;
+    utils::EntityManager* entities = nullptr;
+};
 
 /**
  * AssetLoader consumes a blob of glTF 2.0 content (either JSON or GLB) and produces an "asset",
@@ -37,15 +47,12 @@ namespace gltfio {
  *
  * AssetLoader also owns a cache of Material objects that may be re-used across multiple loads.
  *
- * TODO: currently this uses filamat to generate materials on the fly, but we may wish to allow
- * clients to load a small set of precompiled ubershader materials to avoid the footprint of the
- * filamat library on resource-constrained platforms.
- *
  * Example usage:
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * auto engine = Engine::create();
- * auto loader = AssetLoader::create(engine);
+ * auto materials = createMaterialGenerator(engine);
+ * auto loader = AssetLoader::create({engine, materials});
  *
  * // Parse the glTF content and create Filament entities.
  * std::vector<uint8_t> content(...);
@@ -75,7 +82,8 @@ namespace gltfio {
  * } while (!quit);
  *
  * loader->destroyAsset(asset);
- * loader->destroyMaterials();
+ * materials->destroyMaterials();
+ * delete materials;
  * AssetLoader::destroy(&loader);
  * Engine::destroy(&engine);
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,17 +92,19 @@ class AssetLoader {
 public:
 
     /**
-     * Creates an asset loader for the given engine.
+     * Creates an asset loader for the given configuration, which specifies the Filament engine.
      *
      * The engine is held weakly, used only for the creation and destruction of Filament objects.
      * The optional name component manager can be used to assign names to renderables.
+     * The material source specifies whether to use filamat to generate materials on the fly, or to
+     * load a small set of precompiled ubershader materials.
      */
-    static AssetLoader* create(filament::Engine* engine, utils::NameComponentManager* = nullptr);
+    static AssetLoader* create(const AssetConfiguration& config);
 
     /**
      * Frees the loader.
      *
-     * This does not not automatically free the cache of materials (see destroyMaterials), nor
+     * This does not not automatically free the cache of materials, nor
      * does it free the entities for created assets (see destroyAsset).
      */
     static void destroy(AssetLoader** loader);
@@ -111,15 +121,25 @@ public:
      */
     FilamentAsset* createAssetFromBinary(const uint8_t* bytes, uint32_t nbytes);
 
+    /**
+     * Takes a pointer to an opaque pipeline object and returns a bundle of Filament objects.
+     *
+     * This exists solely for interop with AssetPipeline, which is optional according to the build
+     * configuration.
+     */
+    FilamentAsset* createAssetFromHandle(const void* cgltf);
+
+    /**
+     * Allows clients to enable diagnostic shading on newly-loaded assets.
+     */
+    void enableDiagnostics(bool enable = true);
+
     /** Destroys the given asset and all of its associated Filament objects. */
     void destroyAsset(const FilamentAsset* asset);
 
     /** Gets cached materials, used internally to create material instances for assets. */
     size_t getMaterialsCount() const noexcept;
     const filament::Material* const* getMaterials() const noexcept;
-
-    /** Destroys all cached materials. */
-    void destroyMaterials();
 
 protected:
     AssetLoader() noexcept = default;

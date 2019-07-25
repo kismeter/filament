@@ -19,6 +19,7 @@ package com.google.android.filament;
 import android.support.annotation.IntRange;
 import android.support.annotation.NonNull;
 import android.support.annotation.Size;
+import com.google.android.filament.proguard.UsedByNative;
 
 import java.nio.Buffer;
 import java.util.ArrayList;
@@ -37,7 +38,8 @@ public class Material {
         UNLIT,
         LIT,
         SUBSURFACE,
-        CLOTH
+        CLOTH,
+        SPECULAR_GLOSSINESS
     }
 
     public enum Interpolation {
@@ -68,6 +70,7 @@ public class Material {
         FRONT_AND_BACK
     }
 
+    @UsedByNative("Material.cpp")
     public static class Parameter {
         public enum Type {
             BOOL,
@@ -100,8 +103,8 @@ public class Material {
             DEFAULT
         }
 
-        // Used by native code
         @SuppressWarnings("unused")
+        @UsedByNative("Material.cpp")
         private static final int SAMPLER_OFFSET = Type.MAT4.ordinal() + 1;
 
         @NonNull
@@ -121,8 +124,8 @@ public class Material {
             this.count = count;
         }
 
-        // Used by native code
         @SuppressWarnings("unused")
+        @UsedByNative("Material.cpp")
         private static void add(@NonNull List<Parameter> parameters, @NonNull String name,
                 @IntRange(from = 0) int type, @IntRange(from = 0) int precision,
                 @IntRange(from = 1) int count) {
@@ -131,8 +134,9 @@ public class Material {
         }
     }
 
-    private Material(long nativeMaterial, long nativeDefaultInstance) {
+    Material(long nativeMaterial) {
         mNativeObject = nativeMaterial;
+        long nativeDefaultInstance = nGetDefaultInstance(nativeMaterial);
         mDefaultInstance = new MaterialInstance(this, nativeDefaultInstance);
     }
 
@@ -151,8 +155,7 @@ public class Material {
         public Material build(@NonNull Engine engine) {
             long nativeMaterial = nBuilderBuild(engine.getNativeObject(), mBuffer, mSize);
             if (nativeMaterial == 0) throw new IllegalStateException("Couldn't create Material");
-            long nativeDefaultInstance = nGetDefaultInstance(nativeMaterial);
-            return new Material(nativeMaterial, nativeDefaultInstance);
+            return new Material(nativeMaterial);
         }
     }
 
@@ -210,6 +213,14 @@ public class Material {
 
     public float getMaskThreshold() {
         return nGetMaskThreshold(getNativeObject());
+    }
+
+    public float getSpecularAntiAliasingVariance() {
+        return nGetSpecularAntiAliasingVariance(getNativeObject());
+    }
+
+    public float getSpecularAntiAliasingThreshold() {
+        return nGetSpecularAntiAliasingThreshold(getNativeObject());
     }
 
     public Set<VertexBuffer.VertexAttribute> getRequiredAttributes() {
@@ -353,6 +364,8 @@ public class Material {
     private static native boolean nIsDepthCullingEnabled(long nativeMaterial);
     private static native boolean nIsDoubleSided(long nativeMaterial);
     private static native float nGetMaskThreshold(long nativeMaterial);
+    private static native float nGetSpecularAntiAliasingVariance(long nativeMaterial);
+    private static native float nGetSpecularAntiAliasingThreshold(long nativeMaterial);
 
     private static native int nGetParameterCount(long nativeMaterial);
     private static native void nGetParameters(long nativeMaterial,

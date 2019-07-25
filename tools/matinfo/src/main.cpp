@@ -26,9 +26,7 @@
 #include <filament/MaterialChunkType.h>
 #include <filament/MaterialEnums.h>
 
-#include <filament/driver/DriverEnums.h>
-
-#include <private/filament/EngineEnums.h>
+#include <backend/DriverEnums.h>
 
 #include <utils/Path.h>
 
@@ -42,7 +40,7 @@
 using namespace filaflat;
 using namespace filamat;
 using namespace filament;
-using namespace driver;
+using namespace backend;
 using namespace utils;
 
 static const int alignment = 24;
@@ -245,6 +243,7 @@ const char* toString(Shading shadingModel) {
         case Shading::LIT: return "lit";
         case Shading::SUBSURFACE: return "subsurface";
         case Shading::CLOTH: return "cloth";
+        case Shading::SPECULAR_GLOSSINESS: return "specularGlossiness";
     }
 }
 
@@ -253,9 +252,11 @@ const char* toString(BlendingMode blendingMode) {
     switch (blendingMode) {
         case BlendingMode::OPAQUE: return "opaque";
         case BlendingMode::TRANSPARENT: return "transparent";
-        case BlendingMode::FADE: return "fade";
         case BlendingMode::ADD: return "add";
         case BlendingMode::MASKED: return "masked";
+        case BlendingMode::FADE: return "fade";
+        case BlendingMode::MULTIPLY: return "multiply";
+        case BlendingMode::SCREEN: return "screen";
     }
 }
 
@@ -306,6 +307,14 @@ const char* toString(VertexAttribute attribute) {
         case VertexAttribute::UV1: return "uv1";
         case VertexAttribute::BONE_INDICES: return "bone indices";
         case VertexAttribute::BONE_WEIGHTS: return "bone weights";
+        case VertexAttribute::CUSTOM0: return "custom0";
+        case VertexAttribute::CUSTOM1: return "custom1";
+        case VertexAttribute::CUSTOM2: return "custom2";
+        case VertexAttribute::CUSTOM3: return "custom3";
+        case VertexAttribute::CUSTOM4: return "custom4";
+        case VertexAttribute::CUSTOM5: return "custom5";
+        case VertexAttribute::CUSTOM6: return "custom6";
+        case VertexAttribute::CUSTOM7: return "custom7";
     }
     return "--";
 }
@@ -450,8 +459,9 @@ static bool printMaterial(const ChunkContainer& container) {
     printChunk<Interpolation, uint8_t>(container, filamat::MaterialInterpolation,
             "Interpolation: ");
     printChunk<bool, bool>(container, filamat::MaterialShadowMultiplier, "Shadow multiply: ");
-    printChunk<bool, bool>(container, filamat::MaterialCurvatureToRoughness, "Curvature to roughness: ");
-    printChunk<bool, bool>(container, filamat::MaterialLimitOverInterpolation, "Limit interpolation: ");
+    printChunk<bool, bool>(container, filamat::MaterialSpecularAntiAliasing, "Specular anti-aliasing: ");
+    printFloatChunk(container, filamat::MaterialSpecularAntiAliasingVariance, "    Variance: ");
+    printFloatChunk(container, filamat::MaterialSpecularAntiAliasingThreshold, "    Threshold: ");
     printChunk<bool, bool>(container, filamat::MaterialClearCoatIorChange, "Clear coat IOR change: ");
 
     std::cout << std::endl;
@@ -463,10 +473,8 @@ static bool printMaterial(const ChunkContainer& container) {
     printChunk<bool, bool>(container, filamat::MaterialDepthWrite, "Depth write: ");
     printChunk<bool, bool>(container, filamat::MaterialDepthTest, "Depth test: ");
     printChunk<bool, bool>(container, filamat::MaterialDoubleSided, "Double sided: ");
-    printChunk<CullingMode, uint8_t>(container, filamat::MaterialCullingMode,
-            "Culling: ");
-    printChunk<TransparencyMode, uint8_t>(container, filamat::MaterialTransparencyMode,
-            "Transparency: ");
+    printChunk<CullingMode, uint8_t>(container, filamat::MaterialCullingMode, "Culling: ");
+    printChunk<TransparencyMode, uint8_t>(container, filamat::MaterialTransparencyMode, "Transparency: ");
 
     std::cout << std::endl;
 
@@ -605,7 +613,7 @@ inline utils::CString typeToString(uint64_t v) {
         str[7 - i] = raw[i];
     }
     str[8] = '\0';
-    return utils::CString(str, 7);
+    return utils::CString(str, strnlen(str, 8));
 }
 
 static void printChunks(const ChunkContainer& container) {
@@ -905,7 +913,9 @@ static bool parseChunks(Config config, void* data, size_t size) {
 
             const auto& item = info[config.shaderIndex];
             parser.getShader(item.shaderModel, item.variant, item.pipelineStage, builder);
-            std::cout << builder.data();
+
+            // Casted to char* to print as a string rather than hex value.
+            std::cout << (const char*) builder.data();
 
             return true;
         }
@@ -965,7 +975,7 @@ static bool parseChunks(Config config, void* data, size_t size) {
 
             const auto& item = info[config.shaderIndex];
             parser.getShader(item.shaderModel, item.variant, item.pipelineStage, builder);
-            std::cout << builder.data();
+            std::cout << (const char*) builder.data();
 
             return true;
         }

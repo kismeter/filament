@@ -38,46 +38,49 @@ struct alignas(4) MaterialKey {
     bool unlit : 1;
     bool hasVertexColors : 1;
     bool hasBaseColorTexture : 1;
-    bool hasMetallicRoughnessTexture : 1;
     bool hasNormalTexture : 1;
     bool hasOcclusionTexture : 1;
     bool hasEmissiveTexture : 1;
-    AlphaMode alphaMode;
+    bool useSpecularGlossiness : 1;
+    AlphaMode alphaMode : 4;
+    bool enableDiagnostics : 4;
+    union {
+        struct {
+            bool hasMetallicRoughnessTexture : 1;
+            uint8_t metallicRoughnessUV : 7;
+        };
+        struct {
+            bool hasSpecularGlossinessTexture : 1;
+            uint8_t specularGlossinessUV : 7;
+        };
+    };
     uint8_t baseColorUV;
-    uint8_t metallicRoughnessUV;
     // -- 32 bit boundary --
     uint8_t emissiveUV;
     uint8_t aoUV;
     uint8_t normalUV;
     bool hasTextureTransforms : 8;
-    // -- 32 bit boundary --
-    float alphaMaskThreshold;
 };
 
-static_assert(sizeof(MaterialKey) == 12, "MaterialKey has unexpected padding.");
+static_assert(sizeof(MaterialKey) == 8, "MaterialKey has unexpected padding.");
 
-inline bool operator==(const MaterialKey& k1, const MaterialKey& k2) {
-    return
-        (k1.doubleSided == k2.doubleSided) &&
-        (k1.unlit == k2.unlit) &&
-        (k1.hasVertexColors == k2.hasVertexColors) &&
-        (k1.hasBaseColorTexture == k2.hasBaseColorTexture) &&
-        (k1.hasMetallicRoughnessTexture == k2.hasMetallicRoughnessTexture) &&
-        (k1.hasNormalTexture == k2.hasNormalTexture) &&
-        (k1.hasOcclusionTexture == k2.hasOcclusionTexture) &&
-        (k1.hasEmissiveTexture == k2.hasEmissiveTexture) &&
-        (k1.alphaMode == k2.alphaMode) &&
-        (k1.baseColorUV == k2.baseColorUV) &&
-        (k1.metallicRoughnessUV == k2.metallicRoughnessUV) &&
-        (k1.emissiveUV == k2.emissiveUV) &&
-        (k1.aoUV == k2.aoUV) &&
-        (k1.normalUV == k2.normalUV) &&
-        (k1.alphaMaskThreshold == k2.alphaMaskThreshold);
-}
+bool operator==(const MaterialKey& k1, const MaterialKey& k2);
 
 // Define a mapping from a uv set index in the source asset to one of Filament's uv sets.
 enum UvSet : uint8_t { UNUSED, UV0, UV1 };
 using UvMap = std::array<UvSet, 8>;
+
+inline uint8_t getNumUvSets(const UvMap& uvmap) {
+    return std::max({
+        uvmap[0], uvmap[1], uvmap[2], uvmap[3],
+        uvmap[4], uvmap[5], uvmap[6], uvmap[7],
+    });
+};
+
+enum MaterialSource {
+    GENERATE_SHADERS,
+    LOAD_UBERSHADERS,
+};
 
 /**
  * MaterialProvider is an interface to a provider of glTF materials with two implementations.
@@ -85,19 +88,14 @@ using UvMap = std::array<UvSet, 8>;
  * - The "MaterialGenerator" implementation generates materials at run time (which can be slow)
  *   and requires the filamat library, but produces streamlined shaders.
  *
- * - The "Ubermaterial" implementation uses a small number of pre-built materials with complex
+ * - The "UbershaderLoader" implementation uses a small number of pre-built materials with complex
  *   fragment shaders, but does not require any run time work or usage of filamat.
  */
 class MaterialProvider {
 public:
-    static MaterialProvider* createMaterialGenerator(filament::Engine* engine);
-
-    static MaterialProvider* createUbermaterial(filament::Engine* engine) {
-         /* TODO: ubermaterial not yet implemented  */
-        return nullptr;
-    }
-
     virtual ~MaterialProvider() {}
+
+    virtual MaterialSource getSource() const noexcept = 0;
 
     // Creates or fetches a compiled Filament material, then creates an instance from it. The given
     // configuration key might be mutated due to resource constraints. The second argument is
@@ -110,6 +108,15 @@ public:
     virtual const filament::Material* const* getMaterials() const noexcept = 0;
     virtual void destroyMaterials() = 0;
 };
+
+namespace details {
+    void constrainMaterial(MaterialKey* key, UvMap* uvmap);
+    void processShaderString(std::string* shader, const UvMap& uvmap,
+            const MaterialKey& config);
+}
+
+MaterialProvider* createMaterialGenerator(filament::Engine* engine);
+MaterialProvider* createUbershaderLoader(filament::Engine* engine);
 
 } // namespace gltfio
 

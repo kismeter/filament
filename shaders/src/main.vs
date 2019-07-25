@@ -1,5 +1,5 @@
 void main() {
-    // Initialize the inputs to sensible default values, see common_material.vs
+    // Initialize the inputs to sensible default values, see material_inputs.vs
     MaterialVertexInputs material;
     initMaterialVertex(material);
 
@@ -35,11 +35,6 @@ void main() {
             skinNormal(material.worldNormal, mesh_bone_indices, mesh_bone_weights);
         #endif
     #endif // MATERIAL_HAS_ANISOTROPY || MATERIAL_HAS_NORMAL
-
-#ifdef GEOMETRIC_SPECULAR_AA_NORMAL
-    vertex_worldNormalCentroid = material.worldNormal;
-#endif // GEOMETRIC_SPECULAR_AA_NORMAL
-
 #endif // HAS_ATTRIBUTE_TANGENTS
 
     // Invoke user code
@@ -84,7 +79,7 @@ void main() {
     // The other vertex domains are handled in initMaterialVertex()->computeWorldPosition()
     gl_Position = getSkinnedPosition();
 #else
-    gl_Position = getClipFromWorldMatrix() * material.worldPosition;
+    gl_Position = getClipFromWorldMatrix() * getWorldPosition(material);
 #endif
 
 #if defined(TARGET_VULKAN_ENVIRONMENT)

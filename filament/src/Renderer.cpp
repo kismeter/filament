@@ -27,10 +27,11 @@
 #include <filament/Scene.h>
 #include <filament/Renderer.h>
 
-#include <filament/driver/PixelBufferDescriptor.h>
+#include <backend/PixelBufferDescriptor.h>
 
 #include "fg/FrameGraph.h"
 #include "fg/FrameGraphResource.h"
+
 
 #include <utils/Panic.h>
 #include <utils/Systrace.h>
@@ -44,7 +45,7 @@ using namespace utils;
 
 namespace filament {
 
-using namespace driver;
+using namespace backend;
 
 namespace details {
 
@@ -56,14 +57,16 @@ FRenderer::FRenderer(FEngine& engine) :
         mIsRGB8Supported(false),
         mPerRenderPassArena(engine.getPerRenderPassAllocator())
 {
+    FDebugRegistry& debugRegistry = engine.getDebugRegistry();
+    debugRegistry.registerProperty("d.ssao.enabled", &engine.debug.ssao.enabled);
 }
 
 void FRenderer::init() noexcept {
     DriverApi& driver = mEngine.getDriverApi();
     mUserEpoch = mEngine.getEngineEpoch();
     mRenderTarget = driver.createDefaultRenderTarget();
-    mIsRGB16FSupported = driver.isRenderTargetFormatSupported(driver::TextureFormat::RGB16F);
-    mIsRGB8Supported = driver.isRenderTargetFormatSupported(driver::TextureFormat::RGB8);
+    mIsRGB16FSupported = driver.isRenderTargetFormatSupported(backend::TextureFormat::RGB16F);
+    mIsRGB8Supported = driver.isRenderTargetFormatSupported(backend::TextureFormat::RGB8);
     if (UTILS_HAS_THREADING) {
         mFrameInfoManager.run();
     }
@@ -105,25 +108,25 @@ void FRenderer::resetUserTime() {
     mUserEpoch = std::chrono::steady_clock::now();
 }
 
-driver::TextureFormat FRenderer::getHdrFormat(const View& view) const noexcept {
+backend::TextureFormat FRenderer::getHdrFormat(const View& view) const noexcept {
     const bool translucent = mSwapChain->isTransparent();
-    if (translucent) return driver::TextureFormat::RGBA16F;
+    if (translucent) return backend::TextureFormat::RGBA16F;
 
     switch (view.getRenderQuality().hdrColorBuffer) {
         case View::QualityLevel::LOW:
         case View::QualityLevel::MEDIUM:
-            return driver::TextureFormat::R11F_G11F_B10F;
+            return backend::TextureFormat::R11F_G11F_B10F;
         case View::QualityLevel::HIGH:
         case View::QualityLevel::ULTRA:
-            return !mIsRGB16FSupported ? driver::TextureFormat::RGBA16F
-                                       : driver::TextureFormat::RGB16F;
+            return !mIsRGB16FSupported ? backend::TextureFormat::RGBA16F
+                                       : backend::TextureFormat::RGB16F;
     }
 }
 
-driver::TextureFormat FRenderer::getLdrFormat() const noexcept {
+backend::TextureFormat FRenderer::getLdrFormat() const noexcept {
     const bool translucent = mSwapChain->isTransparent();
-    return (translucent || !mIsRGB8Supported) ? driver::TextureFormat::RGBA8
-                                              : driver::TextureFormat::RGB8;
+    return (translucent || !mIsRGB8Supported) ? backend::TextureFormat::RGBA8
+                                              : backend::TextureFormat::RGB8;
 }
 
 void FRenderer::render(FView const* view) {
@@ -163,13 +166,18 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
 
     filament::Viewport const& vp = view.getViewport();
     const bool hasPostProcess = view.hasPostProcessPass();
+    bool toneMapping = view.getToneMapping() == View::ToneMapping::ACES;
+    bool dithering = view.getDithering() == View::Dithering::TEMPORAL;
+    bool fxaa = view.getAntiAliasing() == View::AntiAliasing::FXAA;
+    uint8_t msaa = view.getSampleCount();
     float2 scale = view.updateScale(mFrameInfoManager.getLastFrameTime());
-    bool useFXAA = view.getAntiAliasing() == View::AntiAliasing::FXAA;
     if (!hasPostProcess) {
         // dynamic scaling and FXAA are part of the post-process phase and can't happen if
         // it's disabled.
-        useFXAA = false;
+        fxaa = false;
+        dithering = false;
         scale = 1.0f;
+        msaa = 1;
     }
 
     const bool scaled = any(notEqual(scale, float2(1.0f)));
@@ -188,19 +196,31 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
      * Allocate command buffer.
      */
 
+    FScene& scene = *view.getScene();
+
     const size_t commandsSize = FEngine::CONFIG_PER_FRAME_COMMANDS_SIZE;
     const size_t commandsCount = commandsSize / sizeof(Command);
     GrowingSlice<Command> commands(
             arena.allocate<Command>(commandsCount, CACHELINE_SIZE), commandsCount);
+
+
+    RenderPass pass(engine, commands);
+    RenderPass::RenderFlags renderFlags = 0;
+    if (view.hasShadowing())               renderFlags |= RenderPass::HAS_SHADOWING;
+    if (view.hasDirectionalLight())        renderFlags |= RenderPass::HAS_DIRECTIONAL_LIGHT;
+    if (view.hasDynamicLighting())         renderFlags |= RenderPass::HAS_DYNAMIC_LIGHTING;
+    if (view.isFrontFaceWindingInverted()) renderFlags |= RenderPass::HAS_INVERSE_FRONT_FACES;
+    pass.setRenderFlags(renderFlags);
+
 
     /*
      * Shadow pass
      */
 
     if (view.hasShadowing()) {
-        ShadowPass::renderShadowMap(engine, js, view, commands);
-        recordHighWatermark(commands); // for debugging
-        // reset the command buffer
+        view.getShadowMap().render(driver, pass, view);
+        driver.flush(); // Kick the GPU since we're done with this render target
+        engine.flush(); // Wake-up the driver thread
         commands.clear();
     }
 
@@ -211,7 +231,6 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
     FrameGraph fg;
 
     const TextureFormat hdrFormat = getHdrFormat(view);
-    const uint8_t useMSAA = view.getSampleCount();
 
     // FIXME: we use "hasPostProcess" as a proxy for deciding if we need a depth-buffer or not
     //        historically this has been true, but it's definitely wrong.
@@ -219,61 +238,148 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
     //        so when skipping post-process (which draws directly into it), we can't rely on it.
     const bool colorPassNeedsDepthBuffer = hasPostProcess;
 
-    const Handle<HwRenderTarget> viewRenderTarget = getRenderTarget();
+    const backend::Handle<backend::HwRenderTarget> viewRenderTarget = getRenderTarget(view);
     FrameGraphResource output = fg.importResource("viewRenderTarget",
-            { .viewport = vp }, viewRenderTarget, vp.width, vp.height);
+            { .viewport = vp }, viewRenderTarget, vp.width, vp.height,
+            view.getDiscardedTargetBuffers());
 
     /*
      * Depth + Color passes
      */
 
+    CameraInfo const& cameraInfo = view.getCameraInfo();
+    pass.setCamera(cameraInfo);
+    pass.setGeometry(scene, view.getVisibleRenderables());
+
+    view.updatePrimitivesLod(engine, cameraInfo,
+            scene.getRenderableData(), view.getVisibleRenderables());
+    view.prepareCamera(cameraInfo, svp);
+    view.commitUniforms(driver);
+
+
+    // --------------------------------------------------------------------------------------------
+
+    const bool useSSAO = view.getAmbientOcclusion() != View::AmbientOcclusion::NONE;
+
+    // SSAO pass -- automatically culled if not used
+    if (useSSAO) {
+        pass.appendSortedCommands(RenderPass::CommandTypeFlags::DEPTH);
+    }
+
+    FrameGraphResource ssao = ppm.ssao(fg, pass, svp, cameraInfo, view.getAmbientOcclusionOptions());
+
+    // --------------------------------------------------------------------------------------------
+
+    // generate the normal commands
+    RenderPass::CommandTypeFlags commandType = getCommandType(view.getDepthPrepass());
+    Command const* colorPassBegin = commands.end();
+    Command const* colorPassEnd = pass.appendSortedCommands(commandType);
+
+    // We only honor the view's color buffer clear flags, depth/stencil are handled by the framefraph
+    TargetBufferFlags clearFlags = view.getClearFlags() & TargetBufferFlags::COLOR | TargetBufferFlags::DEPTH;
+
     struct ColorPassData {
         FrameGraphResource color;
         FrameGraphResource depth;
+        FrameGraphResource ssao;
     };
 
-    auto& colorPass = fg.addPass<ColorPassData>("Color pass",
-            [&](FrameGraph::Builder& builder, ColorPassData& data) {
+    auto& colorPass = fg.addPass<ColorPassData>("Color Pass",
+            [&svp, hdrFormat, colorPassNeedsDepthBuffer, msaa, clearFlags, useSSAO, ssao]
+            (FrameGraph::Builder& builder, ColorPassData& data) {
 
-                data.color = builder.createTexture("color buffer",
-                        { .width = svp.width, .height = svp.height, .format = hdrFormat });
+                if (useSSAO) {
+                    data.ssao = builder.read(ssao);
+                }
+
+                data.color = builder.createTexture("Color Buffer",
+                        { .width = svp.width, .height = svp.height, .format = hdrFormat, .samples = msaa });
 
                 if (colorPassNeedsDepthBuffer) {
-                    data.depth = builder.createTexture("depth buffer",
-                            { .width = svp.width, .height = svp.height });
+                    data.depth = builder.createTexture("Depth Buffer", {
+                            .width = svp.width, .height = svp.height,
+                            .format = TextureFormat::DEPTH24,
+                            .samples = msaa
+                    });
                 }
 
                 FrameGraphRenderTarget::Descriptor desc{
-                        .samples = useMSAA,
+                        .samples = msaa,
                         .attachments.color = data.color,
                         .attachments.depth = data.depth
                 };
-                data.color = builder.useRenderTarget("colorRenderTarget", desc).textures[0];
+
+                auto attachments = builder.useRenderTarget("Color Pass Target", desc, clearFlags);
+                data.color = attachments.color;
+                data.depth = attachments.depth;
             },
-            [=, &engine, &js, &view, &commands]
+            [&pass, &ppm, colorPassBegin, colorPassEnd, jobFroxelize, &js, &view]
                     (FrameGraphPassResources const& resources,
                             ColorPassData const& data, DriverApi& driver) {
                 auto out = resources.getRenderTarget(data.color);
-                ColorPass::renderColorPass(engine, js, jobFroxelize, out.target, view,
-                        static_cast<filament::Viewport const&>(out.params.viewport),
-                        commands);
+                Handle<HwTexture> ssao;
+                if (data.ssao.isValid()) {
+                    ssao = resources.getTexture(data.ssao);
+                } else {
+                    ssao = ppm.getNoSSAOTexture();
+                }
+                view.prepareSSAO(ssao);
+                view.commitUniforms(driver);
+
+                out.params.clearColor = view.getClearColor();
+
+                if (jobFroxelize) {
+                    auto sync = jobFroxelize;
+                    js.waitAndRelease(sync);
+                    view.commitFroxels(driver);
+                }
+
+                pass.execute(resources.getPassName(), out.target, out.params,
+                        colorPassBegin, colorPassEnd);
+
+                // Unbind the SSAO sampler, as the frame graph will delete the texture at the end of
+                // the pass.
+                view.cleanupSSAO();
             });
 
+    jobFroxelize = nullptr;
     FrameGraphResource input = colorPass.getData().color;
 
     /*
      * Post Processing...
      */
 
-    if (hasPostProcess) {
-        const TextureFormat ldrFormat = getLdrFormat();
-        const bool translucent = mSwapChain->isTransparent();
+    const bool translucent = mSwapChain->isTransparent();
+    const TextureFormat ldrFormat = (toneMapping && fxaa) ?
+            TextureFormat::RGBA8 : getLdrFormat(); // e.g. RGB8 or RGBA8
 
-        input = ppm.toneMapping(fg, input, ldrFormat, translucent);
-        if (useFXAA) {
-            input = ppm.fxaa(fg, input, ldrFormat, translucent);
+    if (hasPostProcess) {
+        // FIXME: currently we can't render a view on top of another one (with transparency) if
+        //        any post-processing is performed on that view -- this is because post processing
+        //        uses intermediary buffers which are not blended back (they're blitted).
+
+        if (toneMapping) {
+            input = ppm.toneMapping(fg, input, ldrFormat, dithering, translucent);
+        }
+        if (fxaa) {
+            input = ppm.fxaa(fg, input, ldrFormat, !toneMapping || translucent);
         }
         if (scaled) {
+            input = ppm.dynamicScaling(fg, input, ldrFormat);
+        }
+    }
+
+    // If we're rendering into the default RenderTarget (viewRenderTarget), we must take care
+    // of a few things:
+    // - since viewRenderTarget doesn't have depth or multi-sample buffer, we have to use an
+    //   intermediate buffer which has one. We do this by forcing a blit.
+    // - however a blit operation cannot move or scale the source, so we must additionally
+    //   do a resolve pass in the multi-sample case.
+    if (input == colorPass.getData().color) {
+        if (msaa > 1) {
+            input = ppm.resolve(fg, input);
+            input = ppm.dynamicScaling(fg, input, ldrFormat);
+        } else if (colorPassNeedsDepthBuffer) {
             input = ppm.dynamicScaling(fg, input, ldrFormat);
         }
     }
@@ -284,22 +390,22 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
 
     fg.compile();
     //fg.export_graphviz(slog.d);
-    fg.execute(driver);
 
-    // for debugging
-    recordHighWatermark(commands);
+    fg.execute(engine, driver);
+
+    commands.clear();
+
+    recordHighWatermark(pass.getCommandsHighWatermark());
 }
 
-void FRenderer::mirrorFrame(FSwapChain* dstSwapChain, filament::Viewport const& dstViewport,
-        filament::Viewport const& srcViewport, MirrorFrameFlag flags) {
+void FRenderer::copyFrame(FSwapChain* dstSwapChain, filament::Viewport const& dstViewport,
+        filament::Viewport const& srcViewport, CopyFrameFlag flags) {
     SYSTRACE_CALL();
 
     assert(mSwapChain);
     assert(dstSwapChain);
     FEngine& engine = getEngine();
     FEngine::DriverApi& driver = engine.getDriverApi();
-
-    const Handle<HwRenderTarget> viewRenderTarget = getRenderTarget();
 
     // Set the current swap chain as the read surface, and the destination
     // swap chain as the draw surface so that blitting between default render
@@ -320,12 +426,12 @@ void FRenderer::mirrorFrame(FSwapChain* dstSwapChain, filament::Viewport const& 
         params.viewport.height = std::numeric_limits<uint32_t>::max();
         params.flags.clear |= RenderPassFlags::IGNORE_SCISSOR;
     }
-    driver.beginRenderPass(viewRenderTarget, params);
+    driver.beginRenderPass(mRenderTarget, params);
 
     // Verify that the source swap chain is readable.
     assert(mSwapChain->isReadable());
     driver.blit(TargetBufferFlags::COLOR,
-            viewRenderTarget, dstViewport, viewRenderTarget, srcViewport);
+            mRenderTarget, dstViewport, mRenderTarget, srcViewport, SamplerMagFilter::LINEAR);
     if (flags & SET_PRESENTATION_TIME) {
         // TODO: Implement this properly, see https://github.com/google/filament/issues/633
     }
@@ -347,9 +453,6 @@ bool FRenderer::beginFrame(FSwapChain* swapChain) {
     assert(swapChain);
 
     mFrameId++;
-    if (UTILS_HAS_THREADING) {
-        mFrameInfoManager.beginFrame(mFrameId);
-    }
 
     { // scope for frame id trace
         char buf[64];
@@ -368,6 +471,12 @@ bool FRenderer::beginFrame(FSwapChain* swapChain) {
 
     int64_t monotonic_clock_ns (std::chrono::steady_clock::now().time_since_epoch().count());
     driver.beginFrame(monotonic_clock_ns, mFrameId);
+
+    // This need to occur after the backend beginFrame() because some backends need to start
+    // a command buffer before creating a fence.
+    if (UTILS_HAS_THREADING) {
+        mFrameInfoManager.beginFrame(mFrameId);
+    }
 
     if (!mFrameSkipper.beginFrame()) {
         mFrameInfoManager.cancelFrame();
@@ -440,7 +549,7 @@ void FRenderer::endFrame() {
 }
 
 void FRenderer::readPixels(uint32_t xoffset, uint32_t yoffset, uint32_t width, uint32_t height,
-        driver::PixelBufferDescriptor&& buffer) {
+        backend::PixelBufferDescriptor&& buffer) {
 
     if (!ASSERT_POSTCONDITION_NON_FATAL(
             buffer.type != PixelDataType::COMPRESSED,
@@ -476,6 +585,31 @@ void FRenderer::readPixels(uint32_t xoffset, uint32_t yoffset, uint32_t width, u
     driver.readPixels(mRenderTarget, xoffset, yoffset, width, height, std::move(buffer));
 }
 
+backend::Handle<backend::HwRenderTarget> FRenderer::getRenderTarget(FView& view) const noexcept {
+    backend::Handle<backend::HwRenderTarget> viewRenderTarget = view.getRenderTarget();
+    return viewRenderTarget ? viewRenderTarget : mRenderTarget;
+}
+
+RenderPass::CommandTypeFlags FRenderer::getCommandType(View::DepthPrepass prepass) const noexcept {
+    RenderPass::CommandTypeFlags commandType;
+    switch (prepass) {
+        case View::DepthPrepass::DEFAULT:
+            // TODO: better default strategy (can even change on a per-frame basis)
+            commandType = RenderPass::COLOR_WITH_DEPTH_PREPASS;
+#if defined(ANDROID) || defined(__EMSCRIPTEN__)
+            commandType = RenderPass::COLOR;
+#endif
+            break;
+        case View::DepthPrepass::DISABLED:
+            commandType = RenderPass::COLOR;
+            break;
+        case View::DepthPrepass::ENABLED:
+            commandType = RenderPass::COLOR_WITH_DEPTH_PREPASS;
+            break;
+    }
+    return commandType;
+}
+
 } // namespace details
 
 // ------------------------------------------------------------------------------------------------
@@ -496,13 +630,13 @@ bool Renderer::beginFrame(SwapChain* swapChain) {
     return upcast(this)->beginFrame(upcast(swapChain));
 }
 
-void Renderer::mirrorFrame(SwapChain* dstSwapChain, filament::Viewport const& dstViewport,
-        filament::Viewport const& srcViewport, MirrorFrameFlag flags) {
-    upcast(this)->mirrorFrame(upcast(dstSwapChain), dstViewport, srcViewport, flags);
+void Renderer::copyFrame(SwapChain* dstSwapChain, filament::Viewport const& dstViewport,
+        filament::Viewport const& srcViewport, CopyFrameFlag flags) {
+    upcast(this)->copyFrame(upcast(dstSwapChain), dstViewport, srcViewport, flags);
 }
 
 void Renderer::readPixels(uint32_t xoffset, uint32_t yoffset, uint32_t width, uint32_t height,
-        driver::PixelBufferDescriptor&& buffer) {
+        backend::PixelBufferDescriptor&& buffer) {
     upcast(this)->readPixels(xoffset, yoffset, width, height, std::move(buffer));
 }
 

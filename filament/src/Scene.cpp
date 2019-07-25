@@ -49,7 +49,7 @@ FScene::FScene(FEngine& engine) :
 FScene::~FScene() noexcept = default;
 
 
-void FScene::prepare(const filament::math::mat4f& worldOriginTransform) {
+void FScene::prepare(const mat4f& worldOriginTransform) {
     // TODO: can we skip this in most cases? Since we rely on indices staying the same,
     //       we could only skip, if nothing changed in the RCM.
 
@@ -93,7 +93,7 @@ void FScene::prepare(const filament::math::mat4f& worldOriginTransform) {
 
 
     // find the max intensity directional light index in our local array
-    float maxIntensity = 0;
+    float maxIntensity = 0.0f;
 
     for (Entity e : entities) {
         if (!em.isAlive(e))
@@ -134,6 +134,7 @@ void FScene::prepare(const filament::math::mat4f& worldOriginTransform) {
             if (UTILS_UNLIKELY(lcm.isDirectionalLight(li))) {
                 // we don't store the directional lights, because we only have a single one
                 if (lcm.getIntensity(li) >= maxIntensity) {
+                    maxIntensity = lcm.getIntensity(li);
                     float3 d = lcm.getLocalDirection(li);
                     // using the inverse-transpose handles non-uniform scaling
                     d = normalize(transpose(inverse(worldTransform.upperLeft())) * d);
@@ -163,7 +164,7 @@ void FScene::prepare(const filament::math::mat4f& worldOriginTransform) {
     }
 }
 
-void FScene::updateUBOs(utils::Range<uint32_t> visibleRenderables, Handle<HwUniformBuffer> renderableUbh) noexcept {
+void FScene::updateUBOs(utils::Range<uint32_t> visibleRenderables, backend::Handle<backend::HwUniformBuffer> renderableUbh) noexcept {
     FEngine::DriverApi& driver = mEngine.getDriverApi();
     const size_t size = visibleRenderables.size() * sizeof(PerRenderableUib);
 
@@ -199,7 +200,7 @@ void FScene::updateUBOs(utils::Range<uint32_t> visibleRenderables, Handle<HwUnif
 
     // TODO: handle static objects separately
     mRenderableViewUbh = renderableUbh;
-    driver.updateUniformBuffer(renderableUbh, { buffer, size });
+    driver.loadUniformBuffer(renderableUbh, { buffer, size });
 }
 
 void FScene::terminate(FEngine& engine) {
@@ -207,7 +208,7 @@ void FScene::terminate(FEngine& engine) {
     mRenderableViewUbh.clear();
 }
 
-void FScene::prepareDynamicLights(const CameraInfo& camera, ArenaScope& rootArena, Handle<HwUniformBuffer> lightUbh) noexcept {
+void FScene::prepareDynamicLights(const CameraInfo& camera, ArenaScope& rootArena, backend::Handle<backend::HwUniformBuffer> lightUbh) noexcept {
     FEngine::DriverApi& driver = mEngine.getDriverApi();
     FLightManager& lcm = mEngine.getLightManager();
     FScene::LightSoa& lightData = getLightData();
@@ -258,14 +259,14 @@ void FScene::prepareDynamicLights(const CameraInfo& camera, ArenaScope& rootAren
         lp[gpuIndex].spotScaleOffset.xy   = { lcm.getSpotParams(li).scaleOffset };
     }
 
-    driver.updateUniformBuffer(lightUbh, { lp, positionalLightCount * sizeof(LightsUib) });
+    driver.loadUniformBuffer(lightUbh, { lp, positionalLightCount * sizeof(LightsUib) });
 }
 
 // These methods need to exist so clang honors the __restrict__ keyword, which in turn
 // produces much better vectorization. The ALWAYS_INLINE keyword makes sure we actually don't
 // pay the price of the call!
 UTILS_ALWAYS_INLINE
-void FScene::computeLightCameraPlaneDistances(
+inline void FScene::computeLightCameraPlaneDistances(
         float* UTILS_RESTRICT const distances,
         CameraInfo const& UTILS_RESTRICT camera,
         float4 const* UTILS_RESTRICT const spheres, size_t count) noexcept {
@@ -285,7 +286,7 @@ void FScene::computeLightCameraPlaneDistances(
 // produces much better vectorization. The ALWAYS_INLINE keyword makes sure we actually don't
 // pay the price of the call!
 UTILS_ALWAYS_INLINE
-void FScene::computeLightRanges(
+inline void FScene::computeLightRanges(
         float2* UTILS_RESTRICT const zrange,
         CameraInfo const& UTILS_RESTRICT camera,
         float4 const* UTILS_RESTRICT const spheres, size_t count) noexcept {
@@ -360,35 +361,6 @@ void FScene::setSkybox(FSkybox const* skybox) noexcept {
     }
     if (mSkybox) {
         addEntity(mSkybox->getEntity());
-    }
-}
-
-void FScene::computeBounds(
-        Aabb& UTILS_RESTRICT castersBox,
-        Aabb& UTILS_RESTRICT receiversBox,
-        uint32_t visibleLayers) const noexcept {
-    using State = FRenderableManager::Visibility;
-
-    // Compute the scene bounding volume
-    RenderableSoa const& UTILS_RESTRICT soa = mRenderableData;
-    float3 const* const UTILS_RESTRICT worldAABBCenter = soa.data<WORLD_AABB_CENTER>();
-    float3 const* const UTILS_RESTRICT worldAABBExtent = soa.data<WORLD_AABB_EXTENT>();
-    uint8_t const* const UTILS_RESTRICT layers = soa.data<LAYERS>();
-    State const* const UTILS_RESTRICT visibility = soa.data<VISIBILITY_STATE>();
-    size_t c = soa.size();
-    for (size_t i = 0; i < c; i++) {
-        if (layers[i] & visibleLayers) {
-            const Aabb aabb{ worldAABBCenter[i] - worldAABBExtent[i],
-                             worldAABBCenter[i] + worldAABBExtent[i] };
-            if (visibility[i].castShadows) {
-                castersBox.min = min(castersBox.min, aabb.min);
-                castersBox.max = max(castersBox.max, aabb.max);
-            }
-            if (visibility[i].receiveShadows) {
-                receiversBox.min = min(receiversBox.min, aabb.min);
-                receiversBox.max = max(receiversBox.max, aabb.max);
-            }
-        }
     }
 }
 

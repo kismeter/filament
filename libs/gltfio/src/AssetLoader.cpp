@@ -99,13 +99,13 @@ static uint32_t computeBindingOffset(const cgltf_accessor* accessor) {
 };
 
 struct FAssetLoader : public AssetLoader {
-    FAssetLoader(Engine* engine, NameComponentManager* names) :
-            mEntityManager(EntityManager::get()),
-            mRenderableManager(engine->getRenderableManager()),
-            mNameManager(names),
-            mTransformManager(engine->getTransformManager()),
-            mMaterials(MaterialProvider::createMaterialGenerator(engine)),
-            mEngine(engine) {}
+    FAssetLoader(const AssetConfiguration& config) :
+            mEntityManager(config.entities ? *config.entities : EntityManager::get()),
+            mRenderableManager(config.engine->getRenderableManager()),
+            mNameManager(config.names),
+            mTransformManager(config.engine->getTransformManager()),
+            mMaterials(config.materials),
+            mEngine(config.engine) {}
 
     FFilamentAsset* createAssetFromJson(const uint8_t* bytes, uint32_t nbytes);
     FilamentAsset* createAssetFromBinary(const uint8_t* bytes, uint32_t nbytes);
@@ -126,14 +126,11 @@ struct FAssetLoader : public AssetLoader {
         return mMaterials->getMaterials();
     }
 
-    void destroyMaterials() {
-        mMaterials->destroyMaterials();
-    }
-
     void createAsset(const cgltf_data* srcAsset);
     void createEntity(const cgltf_node* node, Entity parent);
     void createRenderable(const cgltf_node* node, Entity entity);
-    bool createPrimitive(const cgltf_primitive* inPrim, Primitive* outPrim, const UvMap& uvmap);
+    bool createPrimitive(const cgltf_primitive* inPrim, Primitive* outPrim, const UvMap& uvmap,
+            const char* name);
     MaterialInstance* createMaterialInstance(const cgltf_material* inputMat, UvMap* uvmap,
             bool vertexColor);
     void addTextureBinding(MaterialInstance* materialInstance, const char* parameterName,
@@ -153,6 +150,7 @@ struct FAssetLoader : public AssetLoader {
     MatInstanceCache mMatInstanceCache;
     MeshCache mMeshCache;
     bool mError = false;
+    bool mDiagnosticsEnabled = false;
 };
 
 FILAMENT_UPCAST(AssetLoader)
@@ -197,6 +195,14 @@ FilamentAsset* FAssetLoader::createAssetFromBinary(const uint8_t* bytes, uint32_
 }
 
 void FAssetLoader::createAsset(const cgltf_data* srcAsset) {
+    for (cgltf_size i = 0; i < srcAsset->extensions_required_count; i++) {
+        if (!strcmp(srcAsset->extensions_required[i], "KHR_draco_mesh_compression")) {
+            slog.e << "KHR_draco_mesh_compression is not supported." << io::endl;
+            mResult = nullptr;
+            return;
+        }
+    }
+
     mResult = new FFilamentAsset(mEngine);
     mResult->mSourceAsset = srcAsset;
     mResult->acquireSourceAsset();
@@ -301,6 +307,7 @@ void FAssetLoader::createRenderable(const cgltf_node* node, Entity entity) {
         mNameManager->addComponent(entity);
         mNameManager->setName(mNameManager->getInstance(entity), mesh->name);
     }
+    const char* name = mesh->name ? mesh->name : (node->name ? node->name : "mesh");
 
     Aabb aabb;
 
@@ -308,7 +315,7 @@ void FAssetLoader::createRenderable(const cgltf_node* node, Entity entity) {
     for (cgltf_size index = 0; index < nprims; ++index, ++outputPrim, ++inputPrim) {
         RenderableManager::PrimitiveType primType;
         if (!getPrimitiveType(inputPrim->type, &primType)) {
-            slog.e << "Unsupported primitive type." << io::endl;
+            slog.e << "Unsupported primitive type in " << name << io::endl;
         }
 
         // Create a material instance for this primitive or fetch one from the cache.
@@ -318,7 +325,7 @@ void FAssetLoader::createRenderable(const cgltf_node* node, Entity entity) {
         builder.material(index, mi);
 
         // Create a Filament VertexBuffer and IndexBuffer for this prim if we haven't already.
-        if (!outputPrim->vertices && !createPrimitive(inputPrim, outputPrim, uvmap)) {
+        if (!outputPrim->vertices && !createPrimitive(inputPrim, outputPrim, uvmap, name)) {
             mError = true;
             continue;
         }
@@ -354,8 +361,17 @@ void FAssetLoader::createRenderable(const cgltf_node* node, Entity entity) {
        builder.skinning(node->skin->joints_count);
     }
 
+    // Per the spec, glTF models must have valid mix / max annotations for position attributes.
+    // However in practice these can be missing and we should be as robust as other glTF viewers.
+    // If desired, clients can enable the "recomputeBoundingBoxes" feature in ResourceLoader.
+    Box box = Box().set(aabb.min, aabb.max);
+    if (box.isEmpty()) {
+        slog.w << "Missing bounding box in " << name << io::endl;
+        box = Box().set(std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max());
+    }
+
     builder
-        .boundingBox(Box().set(aabb.min, aabb.max))
+        .boundingBox(box)
         .culling(true)
         .castShadows(true)
         .receiveShadows(true)
@@ -365,7 +381,7 @@ void FAssetLoader::createRenderable(const cgltf_node* node, Entity entity) {
 }
 
 bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* outPrim,
-        const UvMap& uvmap) {
+        const UvMap& uvmap, const char* name) {
 
     // In glTF, each primitive may or may not have an index buffer. If a primitive does not have an
     // index buffer, we ask the ResourceLoader to generate a trivial index buffer.
@@ -376,7 +392,7 @@ bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* out
         ibb.indexCount(indicesAccessor->count);
         IndexBuffer::IndexType indexType;
         if (!getIndexType(indicesAccessor->component_type, &indexType)) {
-            utils::slog.e << "Unrecognized index type." << utils::io::endl;
+            utils::slog.e << "Unrecognized index type in " << name << utils::io::endl;
             return false;
         }
         ibb.bufferType(indexType);
@@ -406,22 +422,21 @@ bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* out
     }
     mResult->mIndexBuffers.push_back(indices);
 
-    // We do not necessarily upload all glTF attribute buffers to the GPU. For example, we do not
-    // upload tangent vectors in their source format or more than two UV sets. However the buffer
-    // count that gets passed to the Builder should be equal to the glTF attribute count because we
-    // do not remap the slots.
     VertexBuffer::Builder vbb;
-    vbb.bufferCount(inPrim->attributes_count);
 
-    for (int slot = 0; slot < inPrim->attributes_count; slot++) {
-        const cgltf_attribute& inputAttribute = inPrim->attributes[slot];
+    int slot = 0;
+    bool hasUv0 = false, hasUv1 = false, hasVertexColor = false, hasNormals = false;
+    uint32_t vertexCount = 0;
+    for (cgltf_size aindex = 0; aindex < inPrim->attributes_count; aindex++) {
+        const cgltf_attribute& inputAttribute = inPrim->attributes[aindex];
         const cgltf_accessor* inputAccessor = inputAttribute.data;
 
         // At a minimum, surface orientation requires normals to be present in the source data.
         // Here we re-purpose the normals slot to point to the quats that get computed later.
         if (inputAttribute.type == cgltf_attribute_type_normal) {
-            vbb.attribute(VertexAttribute::TANGENTS, slot, VertexBuffer::AttributeType::SHORT4);
+            vbb.attribute(VertexAttribute::TANGENTS, slot++, VertexBuffer::AttributeType::SHORT4);
             vbb.normalized(VertexAttribute::TANGENTS);
+            hasNormals = true;
             continue;
         }
 
@@ -430,11 +445,15 @@ bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* out
             continue;
         }
 
+        if (inputAttribute.type == cgltf_attribute_type_color) {
+            hasVertexColor = true;
+        }
+
         // Translate the cgltf attribute enum into a Filament enum and ignore all uv sets
         // that do not have entries in the mapping table.
         VertexAttribute semantic;
         if (!getVertexAttrType(inputAttribute.type, &semantic)) {
-            utils::slog.e << "Unrecognized vertex semantic." << utils::io::endl;
+            utils::slog.e << "Unrecognized vertex semantic in " << name << utils::io::endl;
             return false;
         }
         UvSet uvset = uvmap[inputAttribute.index];
@@ -442,9 +461,11 @@ bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* out
             switch (uvset) {
                 case UV0:
                     semantic = VertexAttribute::UV0;
+                    hasUv0 = true;
                     break;
                 case UV1:
                     semantic = VertexAttribute::UV1;
+                    hasUv1 = true;
                     break;
                 case UNUSED:
                     // It is perfectly acceptable to drop unused texture coordinate sets. In fact
@@ -453,8 +474,7 @@ bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* out
             }
         }
 
-        // This will needlessly set the same vertex count multiple times, which should be fine.
-        vbb.vertexCount(inputAccessor->count);
+        vertexCount = inputAccessor->count;
 
         // The positions accessor is required to have min/max properties, use them to expand
         // the bounding box for this primitive.
@@ -467,53 +487,130 @@ bool FAssetLoader::createPrimitive(const cgltf_primitive* inPrim, Primitive* out
 
         VertexBuffer::AttributeType atype;
         if (!getElementType(inputAccessor->type, inputAccessor->component_type, &atype)) {
-            slog.e << "Unsupported accessor type." << io::endl;
+            slog.e << "Unsupported accessor type in " << name << io::endl;
             return false;
         }
 
         if (inputAccessor->is_sparse) {
-            slog.e << "Sparse accessors not yet supported." << io::endl;
+            slog.e << "Sparse accessors not yet supported in " << name << io::endl;
             return false;
         }
 
         // The cgltf library provides a stride value for all accessors, even though they do not
         // exist in the glTF file. It is computed from the type and the stride of the buffer view.
         // As a convenience, cgltf also replaces zero (default) stride with the actual stride.
-        vbb.attribute(semantic, slot, atype, 0, inputAccessor->stride);
+        vbb.attribute(semantic, slot++, atype, 0, inputAccessor->stride);
 
         if (inputAccessor->normalized) {
             vbb.normalized(semantic);
         }
     }
 
+    vbb.vertexCount(vertexCount);
+
+    // If an ubershader is used, then we provide a single dummy buffer for all unfulfilled vertex
+    // requirements. The color data should be a sequence of normalized UBYTE4, so dummy UVs are
+    // USHORT2 to make the sizes match.
+    bool needsDummyData = false;
+    if (mMaterials->getSource() == LOAD_UBERSHADERS) {
+        if (!hasUv0) {
+            needsDummyData = true;
+            vbb.attribute(VertexAttribute::UV0, slot, VertexBuffer::AttributeType::USHORT2);
+        }
+        if (!hasUv1) {
+            needsDummyData = true;
+            vbb.attribute(VertexAttribute::UV1, slot, VertexBuffer::AttributeType::USHORT2);
+        }
+        if (!hasVertexColor) {
+            needsDummyData = true;
+            vbb.attribute(VertexAttribute::COLOR, slot, VertexBuffer::AttributeType::UBYTE4);
+            vbb.normalized(VertexAttribute::COLOR);
+        }
+    } else {
+        int numUvSets = getNumUvSets(uvmap);
+        if (!hasUv0 && numUvSets > 0) {
+            needsDummyData = true;
+            vbb.attribute(VertexAttribute::UV0, slot, VertexBuffer::AttributeType::USHORT2);
+            slog.w << "Missing UV0 data in " << name << io::endl;
+        }
+        if (!hasUv1 && numUvSets > 1) {
+            needsDummyData = true;
+            vbb.attribute(VertexAttribute::UV1, slot, VertexBuffer::AttributeType::USHORT2);
+            slog.w << "Missing UV1 data in " << name << io::endl;
+        }
+    }
+
+    if (inPrim->material && !inPrim->material->unlit && !hasNormals) {
+        slog.w << "Missing normals in " << name << io::endl;
+    }
+
+    if (needsDummyData) {
+        slot++;
+    }
+
+    int bufferCount = slot;
+    vbb.bufferCount(bufferCount);
+
     VertexBuffer* vertices = mResult->mPrimMap[inPrim] = vbb.build(*mEngine);
     mResult->mVertexBuffers.push_back(vertices);
 
-    for (cgltf_size slot = 0; slot < inPrim->attributes_count; slot++) {
-        const cgltf_attribute& inputAttribute = inPrim->attributes[slot];
+    slot = 0;
+    for (cgltf_size aindex = 0; aindex < inPrim->attributes_count; aindex++) {
+        const cgltf_attribute& inputAttribute = inPrim->attributes[aindex];
         const cgltf_accessor* inputAccessor = inputAttribute.data;
         const cgltf_buffer_view* bv = inputAccessor->buffer_view;
-        if (inputAttribute.type == cgltf_attribute_type_normal ||
-                inputAttribute.type == cgltf_attribute_type_tangent) {
+        if (inputAttribute.type == cgltf_attribute_type_tangent ||
+                (inputAttribute.type == cgltf_attribute_type_texcoord &&
+                uvmap[inputAttribute.index] == UNUSED)) {
             continue;
         }
-        if (inputAttribute.type == cgltf_attribute_type_texcoord &&
-                uvmap[inputAttribute.index] == UNUSED) {
+        if (inputAttribute.type == cgltf_attribute_type_normal) {
+            mResult->mBufferBindings.push_back({
+                .uri = bv->buffer->uri,
+                .totalSize = uint32_t(bv->buffer->size),
+                .bufferIndex = uint8_t(slot++),
+                .vertexBuffer = vertices,
+                .indexBuffer = nullptr,
+                .convertBytesToShorts = false,
+                .generateTrivialIndices = false,
+                .generateDummyData = false,
+                .generateTangents = true,
+            });
             continue;
         }
-        mResult->mBufferBindings.emplace_back(BufferBinding {
+        mResult->mBufferBindings.push_back({
             .uri = bv->buffer->uri,
             .totalSize = uint32_t(bv->buffer->size),
-            .bufferIndex = uint8_t(slot),
+            .bufferIndex = uint8_t(slot++),
             .offset = computeBindingOffset(inputAccessor),
             .size = computeBindingSize(inputAccessor),
             .data = &bv->buffer->data,
             .vertexBuffer = vertices,
             .indexBuffer = nullptr,
             .convertBytesToShorts = false,
-            .generateTrivialIndices = false
+            .generateTrivialIndices = false,
+            .generateDummyData = false,
+            .generateTangents = false
         });
     }
+
+    if (needsDummyData) {
+        mResult->mBufferBindings.push_back({
+            .uri = "",
+            .totalSize = uint32_t(sizeof(ubyte4) * vertexCount),
+            .bufferIndex = uint8_t(slot++),
+            .offset = 0,
+            .size = uint32_t(sizeof(ubyte4) * vertexCount),
+            .data = nullptr,
+            .vertexBuffer = vertices,
+            .indexBuffer = nullptr,
+            .convertBytesToShorts = false,
+            .generateTrivialIndices = false,
+            .generateDummyData = true
+        });
+    }
+
+    assert(bufferCount == slot);
 
     outPrim->indices = indices;
     outPrim->vertices = vertices;
@@ -540,35 +637,54 @@ MaterialInstance* FAssetLoader::createMaterialInstance(const cgltf_material* inp
         return mi;
     }
 
-    if (inputMat->has_pbr_specular_glossiness) {
-        slog.e << "KHR_materials_pbrSpecularGlossiness is not supported." << io::endl;
-    }
+    auto mrConfig = inputMat->pbr_metallic_roughness;
+    auto sgConfig = inputMat->pbr_specular_glossiness;
 
-    auto pbrConfig = inputMat->pbr_metallic_roughness;
-    bool hasTextureTransforms = pbrConfig.base_color_texture.has_transform ||
-        pbrConfig.metallic_roughness_texture.has_transform ||
+    bool hasTextureTransforms =
+        sgConfig.diffuse_texture.has_transform ||
+        sgConfig.specular_glossiness_texture.has_transform ||
+        mrConfig.base_color_texture.has_transform ||
+        mrConfig.metallic_roughness_texture.has_transform ||
         inputMat->normal_texture.has_transform ||
         inputMat->occlusion_texture.has_transform ||
         inputMat->emissive_texture.has_transform;
+
+    cgltf_texture_view baseColorTexture = mrConfig.base_color_texture;
+    cgltf_texture_view metallicRoughnessTexture = mrConfig.metallic_roughness_texture;
 
     MaterialKey matkey {
         .doubleSided = (bool) inputMat->double_sided,
         .unlit = (bool) inputMat->unlit,
         .hasVertexColors = vertexColor,
-        .hasBaseColorTexture = pbrConfig.base_color_texture.texture,
-        .hasMetallicRoughnessTexture = pbrConfig.metallic_roughness_texture.texture,
+        .hasBaseColorTexture = baseColorTexture.texture,
         .hasNormalTexture = inputMat->normal_texture.texture,
         .hasOcclusionTexture = inputMat->occlusion_texture.texture,
         .hasEmissiveTexture = inputMat->emissive_texture.texture,
+        .useSpecularGlossiness = false,
         .alphaMode = AlphaMode::OPAQUE,
-        .baseColorUV = (uint8_t) pbrConfig.base_color_texture.texcoord,
-        .metallicRoughnessUV = (uint8_t) pbrConfig.metallic_roughness_texture.texcoord,
+        .enableDiagnostics = mDiagnosticsEnabled,
+        .hasMetallicRoughnessTexture = metallicRoughnessTexture.texture,
+        .metallicRoughnessUV = (uint8_t) metallicRoughnessTexture.texcoord,
+        .baseColorUV = (uint8_t) baseColorTexture.texcoord,
         .emissiveUV = (uint8_t) inputMat->emissive_texture.texcoord,
         .aoUV = (uint8_t) inputMat->occlusion_texture.texcoord,
         .normalUV = (uint8_t) inputMat->normal_texture.texcoord,
         .hasTextureTransforms = hasTextureTransforms,
-        .alphaMaskThreshold = 0.5f
     };
+
+    if (inputMat->has_pbr_specular_glossiness) {
+        matkey.useSpecularGlossiness = true;
+        if (sgConfig.diffuse_texture.texture) {
+            baseColorTexture = sgConfig.diffuse_texture;
+            matkey.hasBaseColorTexture = true;
+            matkey.baseColorUV = (uint8_t) baseColorTexture.texcoord;
+        }
+        if (sgConfig.specular_glossiness_texture.texture) {
+            metallicRoughnessTexture = sgConfig.specular_glossiness_texture;
+            matkey.hasSpecularGlossinessTexture = true;
+            matkey.specularGlossinessUV = (uint8_t) metallicRoughnessTexture.texcoord;
+        }
+    }
 
     switch (inputMat->alpha_mode) {
         case cgltf_alpha_mode_opaque:
@@ -576,40 +692,55 @@ MaterialInstance* FAssetLoader::createMaterialInstance(const cgltf_material* inp
             break;
         case cgltf_alpha_mode_mask:
             matkey.alphaMode = AlphaMode::MASK;
-            matkey.alphaMaskThreshold = inputMat->alpha_cutoff;
             break;
         case cgltf_alpha_mode_blend:
             matkey.alphaMode = AlphaMode::BLEND;
             break;
     }
 
-    // This not only creates a material instnace, it modifies the material key according to our
+    // This not only creates a material instance, it modifies the material key according to our
     // rendering constraints. For example, Filament only supports 2 sets of texture coordinates.
     MaterialInstance* mi = mMaterials->createMaterialInstance(&matkey, uvmap, inputMat->name);
     mResult->mMaterialInstances.push_back(mi);
 
-    const float* e = &inputMat->emissive_factor[0];
+    if (inputMat->alpha_mode == cgltf_alpha_mode_mask) {
+        mi->setMaskThreshold(inputMat->alpha_cutoff);
+    }
+
+    const float* e = inputMat->emissive_factor;
     mi->setParameter("emissiveFactor", float3(e[0], e[1], e[2]));
 
-    const float* c = &pbrConfig.base_color_factor[0];
+    const float* c = mrConfig.base_color_factor;
     mi->setParameter("baseColorFactor", float4(c[0], c[1], c[2], c[3]));
-    mi->setParameter("metallicFactor", pbrConfig.metallic_factor);
-    mi->setParameter("roughnessFactor", pbrConfig.roughness_factor);
+    mi->setParameter("metallicFactor", mrConfig.metallic_factor);
+    mi->setParameter("roughnessFactor", mrConfig.roughness_factor);
+
+    if (matkey.useSpecularGlossiness) {
+        const float* df = sgConfig.diffuse_factor;
+        const float* sf = sgConfig.specular_factor;
+        mi->setParameter("baseColorFactor", float4(df[0], df[1], df[2], df[3]));
+        mi->setParameter("specularFactor", float3(sf[0], sf[1], sf[2]));
+        mi->setParameter("glossinessFactor", sgConfig.glossiness_factor);
+    }
 
     if (matkey.hasBaseColorTexture) {
-        addTextureBinding(mi, "baseColorMap", pbrConfig.base_color_texture.texture, true);
+        addTextureBinding(mi, "baseColorMap", baseColorTexture.texture, true);
         if (matkey.hasTextureTransforms) {
-            const cgltf_texture_transform& uvt = pbrConfig.base_color_texture.transform;
+            const cgltf_texture_transform& uvt = baseColorTexture.transform;
             auto uvmat = matrixFromUvTransform(uvt.offset, uvt.rotation, uvt.scale);
             mi->setParameter("baseColorUvMatrix", uvmat);
         }
     }
 
     if (matkey.hasMetallicRoughnessTexture) {
-        addTextureBinding(mi, "metallicRoughnessMap",
-                pbrConfig.metallic_roughness_texture.texture, false);
+        // The "metallicRoughnessMap" is actually a specular-glossiness map when the extension is
+        // enabled. Note that KHR_materials_pbrSpecularGlossiness specifies that diffuseTexture and
+        // specularGlossinessTexture are both sRGB, whereas the core glTF spec stipulates that
+        // metallicRoughness is not sRGB.
+        bool srgb = inputMat->has_pbr_specular_glossiness;
+        addTextureBinding(mi, "metallicRoughnessMap", metallicRoughnessTexture.texture, srgb);
         if (matkey.hasTextureTransforms) {
-            const cgltf_texture_transform& uvt = pbrConfig.metallic_roughness_texture.transform;
+            const cgltf_texture_transform& uvt = metallicRoughnessTexture.transform;
             auto uvmat = matrixFromUvTransform(uvt.offset, uvt.rotation, uvt.scale);
             mi->setParameter("metallicRoughnessUvMatrix", uvmat);
         }
@@ -711,8 +842,8 @@ bool FAssetLoader::primitiveHasVertexColor(const cgltf_primitive* inPrim) const 
     return false;
 }
 
-AssetLoader* AssetLoader::create(Engine* engine, NameComponentManager* names) {
-    return new FAssetLoader(engine, names);
+AssetLoader* AssetLoader::create(const AssetConfiguration& config) {
+    return new FAssetLoader(config);
 }
 
 void AssetLoader::destroy(AssetLoader** loader) {
@@ -728,6 +859,17 @@ FilamentAsset* AssetLoader::createAssetFromBinary(uint8_t const* bytes, uint32_t
     return upcast(this)->createAssetFromBinary(bytes, nbytes);
 }
 
+FilamentAsset* AssetLoader::createAssetFromHandle(const void* handle) {
+    const cgltf_data* sourceAsset = (const cgltf_data*) handle;
+    upcast(this)->createAsset(sourceAsset);
+    upcast(this)->mResult->mSharedSourceAsset = true;
+    return upcast(this)->mResult;
+}
+
+void AssetLoader::enableDiagnostics(bool enable) {
+    upcast(this)->mDiagnosticsEnabled = enable;
+}
+
 void AssetLoader::destroyAsset(const FilamentAsset* asset) {
     upcast(this)->destroyAsset(upcast(asset));
 }
@@ -738,10 +880,6 @@ size_t AssetLoader::getMaterialsCount() const noexcept {
 
 const Material* const* AssetLoader::getMaterials() const noexcept {
     return upcast(this)->getMaterials();
-}
-
-void AssetLoader::destroyMaterials() {
-    upcast(this)->destroyMaterials();
 }
 
 } // namespace gltfio

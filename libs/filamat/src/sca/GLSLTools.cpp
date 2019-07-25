@@ -18,7 +18,6 @@
 
 #include <cstring>
 
-#include <private/filament/EngineEnums.h>
 #include <filament/MaterialEnums.h>
 #include <private/filament/UniformInterfaceBlock.h>
 #include <private/filament/SamplerInterfaceBlock.h>
@@ -39,7 +38,7 @@
 using namespace utils;
 using namespace glslang;
 using namespace ASTUtils;
-using namespace filament::driver;
+using namespace filament::backend;
 
 namespace filamat {
 
@@ -53,6 +52,7 @@ GLSLangCleaner::~GLSLangCleaner() {
 }
 
 bool GLSLTools::analyzeFragmentShader(const std::string& shaderCode, ShaderModel model,
+        MaterialBuilder::MaterialDomain materialDomain,
         MaterialBuilder::TargetApi targetApi) const noexcept {
 
     // Parse to check syntax and semantic.
@@ -60,6 +60,17 @@ bool GLSLTools::analyzeFragmentShader(const std::string& shaderCode, ShaderModel
 
     TShader tShader(EShLanguage::EShLangFragment);
     tShader.setStrings(&shaderCString, 1);
+
+    auto getMaterialFunctionName = [](MaterialBuilder::MaterialDomain domain) {
+        switch(domain) {
+            case MaterialBuilder::MaterialDomain::SURFACE:
+                return "material";
+
+            case MaterialBuilder::MaterialDomain::POST_PROCESS:
+                return "postProcess";
+        }
+    };
+    const char* materialFunctionName = getMaterialFunctionName(materialDomain);
 
     GLSLangCleaner cleaner;
     int version = glslangVersionFromShaderModel(model);
@@ -73,11 +84,17 @@ bool GLSLTools::analyzeFragmentShader(const std::string& shaderCode, ShaderModel
 
     TIntermNode* root = tShader.getIntermediate()->getTreeRoot();
     // Check there is a material function definition in this shader.
-    TIntermNode* materialFctNode = ASTUtils::getFunctionByNameOnly("material", *root);
+    TIntermNode* materialFctNode = ASTUtils::getFunctionByNameOnly(materialFunctionName, *root);
     if (materialFctNode == nullptr) {
         utils::slog.e << "ERROR: Invalid fragment shader:" << utils::io::endl;
-        utils::slog.e << "ERROR: Unable to find material() function" << utils::io::endl;
+        utils::slog.e << "ERROR: Unable to find " << materialFunctionName << "() function" << utils::io::endl;
         return false;
+    }
+
+    // If this is a post-process material, at this point we've successfully met all the
+    // requirements.
+    if (materialDomain == MaterialBuilder::MaterialDomain::POST_PROCESS) {
+        return true;
     }
 
     // Check there is a prepareMaterial function defintion in this shader.
@@ -102,7 +119,13 @@ bool GLSLTools::analyzeFragmentShader(const std::string& shaderCode, ShaderModel
 }
 
 bool GLSLTools::analyzeVertexShader(const std::string& shaderCode, ShaderModel model,
+        MaterialBuilder::MaterialDomain materialDomain,
         MaterialBuilder::TargetApi targetApi) const noexcept {
+
+    // TODO: After implementing post-process vertex shaders, properly analyze them here.
+    if (materialDomain == MaterialBuilder::MaterialDomain::POST_PROCESS) {
+        return true;
+    }
 
     // Parse to check syntax and semantic.
     const char* shaderCString = shaderCode.c_str();
@@ -141,19 +164,10 @@ void GLSLTools::shutdown() {
     FinalizeProcess();
 }
 
-bool GLSLTools::findProperties(const filamat::MaterialBuilder& builderIn,
+bool GLSLTools::findProperties(const std::string& shaderCode,
         MaterialBuilder::PropertyList& properties,
-        MaterialBuilder::TargetApi targetApi) const noexcept {
-    filamat::MaterialBuilder builder(builderIn);
-
-    // Some fields in MaterialInputs only exist if the property is set (e.g: normal, subsurface
-    // for cloth shading model). Give our shader all properties. This will enable us to parse and
-    // static code analyse the AST.
-    MaterialBuilder::PropertyList allProperties;
-    std::fill_n(allProperties, MaterialBuilder::MATERIAL_PROPERTIES_COUNT, true);
-
-    ShaderModel model;
-    std::string shaderCode = builder.peek(ShaderType::FRAGMENT, model, allProperties);
+        MaterialBuilder::TargetApi targetApi,
+        ShaderModel model) const noexcept {
     const char* shaderCString = shaderCode.c_str();
 
     TShader tShader(EShLanguage::EShLangFragment);

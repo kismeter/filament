@@ -95,6 +95,13 @@ Java_com_google_android_filament_View_nSetShadowsEnabled(JNIEnv*, jclass,
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_google_android_filament_View_nSetRenderTarget(JNIEnv*, jclass,
+        jlong nativeView, jlong nativeTarget) {
+    View* view = (View*) nativeView;
+    view->setRenderTarget((RenderTarget*) nativeTarget);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_google_android_filament_View_nSetSampleCount(JNIEnv*, jclass,
         jlong nativeView, jint count) {
     View* view = (View*) nativeView;
@@ -120,6 +127,34 @@ Java_com_google_android_filament_View_nGetAntiAliasing(JNIEnv*, jclass,
         jlong nativeView) {
     View* view = (View*) nativeView;
     return (jint) view->getAntiAliasing();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_android_filament_View_nSetToneMapping(JNIEnv*, jclass,
+        jlong nativeView, jint type) {
+    View* view = (View*) nativeView;
+    view->setToneMapping(View::ToneMapping(type));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_google_android_filament_View_nGetToneMapping(JNIEnv*, jclass,
+        jlong nativeView) {
+    View* view = (View*) nativeView;
+    return (jint) view->getToneMapping();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_android_filament_View_nSetDithering(JNIEnv*, jclass,
+        jlong nativeView, jint dithering) {
+    View* view = (View*) nativeView;
+    view->setDithering((View::Dithering) dithering);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_google_android_filament_View_nGetDithering(JNIEnv*, jclass,
+        jlong nativeView) {
+    View* view = (View*) nativeView;
+    return (jint)view->getDithering();
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -190,4 +225,24 @@ Java_com_google_android_filament_View_nIsFrontFaceWindingInverted(JNIEnv*,
         jclass, jlong nativeView) {
     View* view = (View*) nativeView;
     return static_cast<jboolean>(view->isFrontFaceWindingInverted());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_android_filament_View_nSetAmbientOcclusion(JNIEnv*, jclass, jlong nativeView, jint ordinal) {
+    View* view = (View*) nativeView;
+    view->setAmbientOcclusion((View::AmbientOcclusion)ordinal);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_google_android_filament_View_nGetAmbientOcclusion(JNIEnv*, jclass, jlong nativeView) {
+    View* view = (View*) nativeView;
+    return (jint)view->getAmbientOcclusion();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_android_filament_View_nSetAmbientOcclusionOptions(JNIEnv*, jclass,
+    jlong nativeView, jfloat radius, jfloat bias, jfloat power, jfloat resolution) {
+    View* view = (View*) nativeView;
+    View::AmbientOcclusionOptions options = { .radius = radius, .bias = bias, .power = power, .resolution = resolution};
+    view->setAmbientOcclusionOptions(options);
 }

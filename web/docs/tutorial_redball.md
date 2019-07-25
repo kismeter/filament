@@ -144,7 +144,7 @@ const material = engine.createMaterial(filamat_url);
 const matinstance = material.createInstance();
 
 const red = [0.8, 0.0, 0.0];
-matinstance.setColorParameter('baseColor', Filament.RgbType.sRGB, red);
+matinstance.setColor3Parameter('baseColor', Filament.RgbType.sRGB, red);
 matinstance.setFloatParameter('roughness', 0.5);
 matinstance.setFloatParameter('clearCoat', 1.0);
 matinstance.setFloatParameter('clearCoatRoughness', 0.3);
@@ -229,8 +229,8 @@ Next we need to create an `IndirectLight` object from the KTX IBL. One way of do
 following (don't type this out, there's an easier way).
 
 ```js
-const format = Filament.PixelDataFormat.RGBM;
-const datatype = Filament.PixelDataType.UBYTE;
+const format = Filament.PixelDataFormat.RGB;
+const datatype = Filament.PixelDataType.UINT_10F_11F_11F_REV;
 
 // Create a Texture object for the mipmapped cubemap.
 const ibl_package = Filament.Buffer(Filament.assets[ibl_url]);
@@ -242,7 +242,6 @@ const ibltex = Filament.Texture.Builder()
   .levels(iblktx.getNumMipLevels())
   .sampler(Filament.Texture$Sampler.SAMPLER_CUBEMAP)
   .format(Filament.Texture$InternalFormat.RGBA8)
-  .rgbm(true)
   .build(engine);
 
 for (let level = 0; level < iblktx.getNumMipLevels(); ++level) {
@@ -289,7 +288,6 @@ const skytex = Filament.Texture.Builder()
   .levels(1)
   .sampler(Filament.Texture$Sampler.SAMPLER_CUBEMAP)
   .format(Filament.Texture$InternalFormat.RGBA8)
-  .rgbm(true)
   .build(engine);
 
 const uint8array = skyktx.getCubeBlob(0).getBytes();

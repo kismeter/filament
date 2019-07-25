@@ -17,9 +17,8 @@
 #ifndef TNT_FILAMAT_MATERIALINFO_H
 #define TNT_FILAMAT_MATERIALINFO_H
 
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 #include <filament/MaterialEnums.h>
-#include <private/filament/EngineEnums.h>
 #include <private/filament/UniformInterfaceBlock.h>
 #include <private/filament/SamplerBindingMap.h>
 #include <private/filament/SamplerInterfaceBlock.h>
@@ -28,21 +27,25 @@
 
 namespace filamat {
 
-using UniformType = filament::driver::UniformType;
-using SamplerType = filament::driver::SamplerType;
-using CullingMode = filament::driver::CullingMode;
+using UniformType = filament::backend::UniformType;
+using SamplerType = filament::backend::SamplerType;
+using CullingMode = filament::backend::CullingMode;
 
 struct UTILS_PUBLIC MaterialInfo {
     bool isLit;
-    bool isDoubleSided;
+    bool hasDoubleSidedCapability;
     bool hasExternalSamplers;
     bool hasShadowMultiplier;
-    bool curvatureToRoughness;
-    bool limitOverInterpolation;
+    bool specularAntiAliasing;
     bool clearCoatIorChange;
     bool flipUV;
+    bool multiBounceAO;
+    bool multiBounceAOSet;
+    bool specularAO;
+    bool specularAOSet;
     filament::AttributeBitset requiredAttributes;
     filament::BlendingMode blendingMode;
+    filament::BlendingMode postLightingBlendingMode;
     filament::Shading shading;
     filament::UniformInterfaceBlock uib;
     filament::SamplerInterfaceBlock sib;

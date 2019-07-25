@@ -21,18 +21,20 @@
 
 #include <gltfio/FilamentAsset.h>
 
+#include <backend/BufferDescriptor.h>
+
 #include <utils/Path.h>
 
 namespace gltfio {
 
 namespace details {
-    class FFilamentAsset;
+    struct FFilamentAsset;
     class AssetPool;
 }
 
 struct ResourceConfiguration {
     class filament::Engine* engine;
-    utils::Path basePath;
+    utils::Path gltfPath;
     bool normalizeSkinningWeights;
     bool recomputeBoundingBoxes;
 };
@@ -55,9 +57,27 @@ struct ResourceConfiguration {
  */
 class ResourceLoader {
 public:
+    using BufferDescriptor = filament::backend::BufferDescriptor;
+
     ResourceLoader(const ResourceConfiguration& config);
     ~ResourceLoader();
+
+    /**
+     * Loads resources for the given asset from the filesystem or data cache and "finalizes" the
+     * asset by transforming the vertex data format if necessary, decoding image files, supplying
+     * tangent data, etc.
+     *
+     * Returns false if resources have already been loaded, or if one or more resources could not
+     * be loaded.
+     */
     bool loadResources(FilamentAsset* asset);
+
+    /**
+     * Adds raw resource data into a cache for platforms that do not have filesystem or network
+     * access.
+     */
+    void addResourceData(std::string url, BufferDescriptor&& buffer);
+
 private:
     bool createTextures(details::FFilamentAsset* asset) const;
     void computeTangents(details::FFilamentAsset* asset) const;
@@ -65,6 +85,9 @@ private:
     void updateBoundingBoxes(details::FFilamentAsset* asset) const;
     details::AssetPool* mPool;
     const ResourceConfiguration mConfig;
+
+    struct Impl;
+    Impl* pImpl;
 };
 
 } // namespace gltfio

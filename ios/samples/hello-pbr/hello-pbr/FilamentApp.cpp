@@ -46,12 +46,12 @@ void FilamentApp::initialize() {
     image::KtxBundle* iblBundle = new image::KtxBundle(RESOURCES_VENETIAN_CROSSROADS_IBL_DATA,
             RESOURCES_VENETIAN_CROSSROADS_IBL_SIZE);
     filament::math::float3 harmonics[9];
-    parseSphereHarmonics(iblBundle->getMetadata("sh"), harmonics);
-    app.iblTexture = image::KtxUtility::createTexture(engine, iblBundle, false, true);
+    iblBundle->getSphericalHarmonics(harmonics);
+    app.iblTexture = image::KtxUtility::createTexture(engine, iblBundle, false);
 
     image::KtxBundle* skyboxBundle = new image::KtxBundle(RESOURCES_VENETIAN_CROSSROADS_SKYBOX_DATA,
             RESOURCES_VENETIAN_CROSSROADS_SKYBOX_SIZE);
-    app.skyboxTexture = image::KtxUtility::createTexture(engine, skyboxBundle, false, true);
+    app.skyboxTexture = image::KtxUtility::createTexture(engine, skyboxBundle, false);
 
     app.skybox = Skybox::Builder()
         .environment(app.skyboxTexture)
@@ -65,6 +65,14 @@ void FilamentApp::initialize() {
     scene->setIndirectLight(app.indirectLight);
     scene->setSkybox(app.skybox);
 
+    app.sun = EntityManager::get().create();
+    LightManager::Builder(LightManager::Type::SUN)
+        .castShadows(true)
+        // The direction is calibrated to match the IBL's sun.
+        .direction({0.548267, -0.473983, -0.689016})
+        .build(*engine, app.sun);
+    scene->addEntity(app.sun);
+
     app.mat = Material::Builder()
         .package(RESOURCES_CLEAR_COAT_DATA, RESOURCES_CLEAR_COAT_SIZE)
         .build(*engine);
@@ -76,6 +84,8 @@ void FilamentApp::initialize() {
 
     app.renderable = mesh.renderable;
     scene->addEntity(app.renderable);
+    auto& rcm = engine->getRenderableManager();
+    rcm.setCastShadows(rcm.getInstance(app.renderable), true);
 
     filaView->setScene(scene);
     filaView->setCamera(camera);
@@ -109,6 +119,7 @@ FilamentApp::~FilamentApp() {
     engine->destroy(app.skyboxTexture);
     engine->destroy(app.skybox);
     engine->destroy(app.renderable);
+    engine->destroy(app.sun);
 
     engine->destroy(renderer);
     engine->destroy(scene);
@@ -116,19 +127,4 @@ FilamentApp::~FilamentApp() {
     engine->destroy(camera);
     engine->destroy(swapChain);
     engine->destroy(&engine);
-}
-
-void FilamentApp::parseSphereHarmonics(const char* str, filament::math::float3 harmonics[9]) {
-    std::istringstream iss(str);
-    std::string read;
-    for (int i = 0; i < 9; i++) {
-        filament::math::float3 harmonic;
-        iss >> read;
-        harmonic.x = std::stof(read);
-        iss >> read;
-        harmonic.y = std::stof(read);
-        iss >> read;
-        harmonic.z = std::stof(read);
-        harmonics[i] = std::move(harmonic);
-    }
 }

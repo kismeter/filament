@@ -21,6 +21,7 @@
 #include <getopt/getopt.h>
 
 #include <imgui.h>
+#include <filagui/ImGuiExtensions.h>
 
 #include <utils/Path.h>
 
@@ -269,7 +270,7 @@ static void gui(filament::Engine* engine, filament::View*) {
     {
         if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Combo("model", &params.currentMaterialModel,
-                    "unlit\0lit\0subsurface\0cloth\0\0");
+                    "unlit\0lit\0subsurface\0cloth\0specularGlossiness\0\0");
 
             if (params.currentMaterialModel == MATERIAL_MODEL_LIT) {
                 ImGui::Combo("blending", &params.currentBlending,
@@ -283,8 +284,14 @@ static void gui(filament::Engine* engine, filament::View*) {
                         params.currentBlending == BLENDING_FADE) {
                     ImGui::SliderFloat("alpha", &params.alpha, 0.0f, 1.0f);
                 }
-                ImGui::SliderFloat("roughness", &params.roughness, 0.0f, 1.0f);
-                if (params.currentMaterialModel != MATERIAL_MODEL_CLOTH) {
+                if (params.currentMaterialModel != MATERIAL_MODEL_SPECGLOSS) {
+                    ImGui::SliderFloat("roughness", &params.roughness, 0.0f, 1.0f);
+                } else {
+                    ImGui::SliderFloat("glossiness", &params.glossiness, 0.0f, 1.0f);
+                    ImGui::ColorEdit3("specularColor", &params.specularColor.r);
+                }
+                if (params.currentMaterialModel != MATERIAL_MODEL_CLOTH &&
+                        params.currentMaterialModel != MATERIAL_MODEL_SPECGLOSS) {
                     ImGui::SliderFloat("metallic", &params.metallic, 0.0f, 1.0f);
                     ImGui::SliderFloat("reflectance", &params.reflectance, 0.0f, 1.0f);
                 }
@@ -306,6 +313,11 @@ static void gui(filament::Engine* engine, filament::View*) {
             }
         }
 
+        if (ImGui::CollapsingHeader("Shading AA")) {
+            ImGui::SliderFloat("variance", &params.specularAntiAliasingVariance, 0.0f, 1.0f);
+            ImGui::SliderFloat("threshold", &params.specularAntiAliasingThreshold, 0.0f, 1.0f);
+        }
+
         if (ImGui::CollapsingHeader("Object")) {
             ImGui::Checkbox("castShadows", &params.castShadows);
         }
@@ -314,27 +326,49 @@ static void gui(filament::Engine* engine, filament::View*) {
             ImGui::Checkbox("enabled", &params.directionalLightEnabled);
             ImGui::ColorEdit3("color", &params.lightColor.r);
             ImGui::SliderFloat("lux", &params.lightIntensity, 0.0f, 150000.0f);
-            ImGui::SliderFloat3("direction", &params.lightDirection.x, -1.0f, 1.0f);
             ImGui::SliderFloat("sunSize", &params.sunAngularRadius, 0.1f, 10.0f);
             ImGui::SliderFloat("haloSize", &params.sunHaloSize, 1.01f, 40.0f);
             ImGui::SliderFloat("haloFalloff", &params.sunHaloFalloff, 0.0f, 2048.0f);
             ImGui::SliderFloat("ibl", &params.iblIntensity, 0.0f, 50000.0f);
             ImGui::SliderAngle("ibl rotation", &params.iblRotation);
+            ImGuiExt::DirectionWidget("direction", &params.lightDirection.x);
+            ImGui::Indent();
+            if (ImGui::CollapsingHeader("SSAO")) {
+                DebugRegistry& debug = engine->getDebugRegistry();
+                ImGui::Checkbox("enabled###ssao", &params.ssao);
+                ImGui::SliderFloat("radius", &params.ssaoOptions.radius, 0.05f, 5.0f);
+                ImGui::SliderFloat("bias", &params.ssaoOptions.bias, 0.0f, 0.1f);
+                ImGui::SliderFloat("power", &params.ssaoOptions.power, 0.0f, 1.0f);
+            }
+            ImGui::Unindent();
         }
 
-        if (ImGui::CollapsingHeader("Anti-aliasing")) {
-            ImGui::Checkbox("fxaa", &params.fxaa);
+        if (ImGui::CollapsingHeader("Post-processing")) {
             ImGui::Checkbox("msaa 4x", &params.msaa);
+            ImGui::Checkbox("tone-mapping", &params.tonemapping);
+            ImGui::Indent();
+                ImGui::Checkbox("dithering", &params.dithering);
+                ImGui::Unindent();
+            ImGui::Checkbox("fxaa", &params.fxaa);
         }
 
         if (ImGui::CollapsingHeader("Debug")) {
             DebugRegistry& debug = engine->getDebugRegistry();
             ImGui::Checkbox("Camera at origin",
                     debug.getPropertyAddress<bool>("d.view.camera_at_origin"));
+            ImGui::Checkbox("Stable Shadow Map", &params.stableShadowMap);
             ImGui::Checkbox("Light Far uses shadow casters",
                     debug.getPropertyAddress<bool>("d.shadowmap.far_uses_shadowcasters"));
             ImGui::Checkbox("Focus shadow casters",
                     debug.getPropertyAddress<bool>("d.shadowmap.focus_shadowcasters"));
+            ImGui::Checkbox("Show checker board",
+                    debug.getPropertyAddress<bool>("d.shadowmap.checkerboard"));
+
+            ImGui::SliderFloat("Normal bias", &params.normalBias, 0.0f, 4.0f);
+            ImGui::SliderFloat("Constant bias", &params.constantBias, 0.0f, 1.0f);
+            ImGui::SliderFloat("Polygon Offset Scale", &params.polygonOffsetSlope, 0.0f, 10.0f);
+            ImGui::SliderFloat("Polygon Offset Constant", &params.polygonOffsetConstant, 0.0f, 10.0f);
+
             bool* lispsm;
             if (debug.getPropertyAddress<bool>("d.shadowmap.lispsm", &lispsm)) {
                 ImGui::Checkbox("Enable LiSPSM", lispsm);
@@ -369,6 +403,23 @@ static void gui(filament::Engine* engine, filament::View*) {
         params.hasDirectionalLight = false;
     }
 
+    auto& lcm = engine->getLightManager();
+    auto lightInstance = lcm.getInstance(params.light);
+    lcm.setColor(lightInstance, params.lightColor);
+    lcm.setIntensity(lightInstance, params.lightIntensity);
+    lcm.setDirection(lightInstance, params.lightDirection);
+    lcm.setSunAngularRadius(lightInstance, params.sunAngularRadius);
+    lcm.setSunHaloSize(lightInstance, params.sunHaloSize);
+    lcm.setSunHaloFalloff(lightInstance, params.sunHaloFalloff);
+
+    LightManager::ShadowOptions options = lcm.getShadowOptions(lightInstance);
+    options.stable = params.stableShadowMap;
+    options.normalBias = params.normalBias;
+    options.constantBias = params.constantBias;
+    options.polygonOffsetConstant = params.polygonOffsetConstant;
+    options.polygonOffsetSlope = params.polygonOffsetSlope;
+    lcm.setShadowOptions(lightInstance, options);
+
     auto* ibl = FilamentApp::get().getIBL();
     if (ibl) {
         ibl->getIndirectLight()->setIntensity(params.iblIntensity);
@@ -378,8 +429,13 @@ static void gui(filament::Engine* engine, filament::View*) {
 }
 
 static void preRender(filament::Engine*, filament::View* view, filament::Scene*, filament::Renderer*) {
-    view->setAntiAliasing(g_params.fxaa ? View::FXAA : View::NONE);
+    view->setAntiAliasing(g_params.fxaa ? View::AntiAliasing::FXAA : View::AntiAliasing::NONE);
+    view->setToneMapping(g_params.tonemapping ? View::ToneMapping::ACES : View::ToneMapping::LINEAR);
+    view->setDithering(g_params.dithering ? View::Dithering::TEMPORAL : View::Dithering::NONE);
     view->setSampleCount((uint8_t) (g_params.msaa ? 4 : 1));
+    view->setAmbientOcclusion(
+            g_params.ssao ? View::AmbientOcclusion::SSAO : View::AmbientOcclusion::NONE);
+    view->setAmbientOcclusionOptions(g_params.ssaoOptions);
 }
 
 int main(int argc, char* argv[]) {

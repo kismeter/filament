@@ -46,8 +46,11 @@ host machine:
 
 ![Material Builder](../../docs/images/samples/sample_image_based_lighting.jpg)
 
-The `material-builder` sample requires the `filamat` static library which can be compiled by adding
-the `-l` flag to the `./build.sh` command.
+### `gltf-bloom`
+
+Demonstrates how to load glTF models and render to an offscreen buffer:
+
+![glTF Bloom](../../docs/images/samples/sample_gltf_bloom.jpg)
 
 ## Prerequisites
 

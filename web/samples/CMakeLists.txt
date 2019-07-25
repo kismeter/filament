@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.10)
 project(websamples)
 
 set(SERVER_DIR ${PROJECT_BINARY_DIR})
@@ -57,8 +57,8 @@ function(add_ktxfiles SOURCE TARGET EXTRA_ARGS)
         DEPENDS mipgen)
 endfunction()
 
-# Somtimes we want to load raw PNG files instead of KTX; simply copy those into the server folder.
-function(add_pngfile SOURCE TARGET)
+# Raw resource files can simply be copied into the server folder.
+function(add_rawfile SOURCE TARGET)
     set(source_path "${ROOT_DIR}/${SOURCE}")
     set(target_path "${SERVER_DIR}/${TARGET}")
     set(target_textures ${target_textures} ${target_path} PARENT_SCOPE)
@@ -85,21 +85,23 @@ add_ktxfiles("assets/models/monkey/metallic.png" "metallic_etc.ktx" "${ETC_R11_A
 add_ktxfiles("assets/models/monkey/ao.png" "ao.ktx" "--grayscale")
 add_ktxfiles("assets/models/monkey/ao.png" "ao_etc.ktx" "${ETC_R11_ARGS}")
 
-add_pngfile("third_party/models/helmet/FlightHelmet_baseColor.png" "FlightHelmet_baseColor.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_baseColor1.png" "FlightHelmet_baseColor1.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_baseColor2.png" "FlightHelmet_baseColor2.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_baseColor3.png" "FlightHelmet_baseColor3.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_baseColor4.png" "FlightHelmet_baseColor4.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_normal.png" "FlightHelmet_normal.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_normal1.png" "FlightHelmet_normal1.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_normal2.png" "FlightHelmet_normal2.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_normal3.png" "FlightHelmet_normal3.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_normal4.png" "FlightHelmet_normal4.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_occlusionRoughnessMetallic.png" "FlightHelmet_occlusionRoughnessMetallic.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_occlusionRoughnessMetallic1.png" "FlightHelmet_occlusionRoughnessMetallic1.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_occlusionRoughnessMetallic2.png" "FlightHelmet_occlusionRoughnessMetallic2.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_occlusionRoughnessMetallic3.png" "FlightHelmet_occlusionRoughnessMetallic3.png")
-add_pngfile("third_party/models/helmet/FlightHelmet_occlusionRoughnessMetallic4.png" "FlightHelmet_occlusionRoughnessMetallic4.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_baseColor.png" "FlightHelmet_baseColor.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_baseColor1.png" "FlightHelmet_baseColor1.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_baseColor2.png" "FlightHelmet_baseColor2.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_baseColor3.png" "FlightHelmet_baseColor3.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_baseColor4.png" "FlightHelmet_baseColor4.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_normal.png" "FlightHelmet_normal.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_normal1.png" "FlightHelmet_normal1.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_normal2.png" "FlightHelmet_normal2.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_normal3.png" "FlightHelmet_normal3.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_normal4.png" "FlightHelmet_normal4.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_occlusionRoughnessMetallic.png" "FlightHelmet_occlusionRoughnessMetallic.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_occlusionRoughnessMetallic1.png" "FlightHelmet_occlusionRoughnessMetallic1.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_occlusionRoughnessMetallic2.png" "FlightHelmet_occlusionRoughnessMetallic2.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_occlusionRoughnessMetallic3.png" "FlightHelmet_occlusionRoughnessMetallic3.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet_occlusionRoughnessMetallic4.png" "FlightHelmet_occlusionRoughnessMetallic4.png")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet.bin" "FlightHelmet.bin")
+add_rawfile("third_party/models/FlightHelmet/FlightHelmet.gltf" "helmet.gltf")
 
 # Convert OBJ files into filamesh files.
 function(add_mesh SOURCE TARGET)
@@ -114,14 +116,11 @@ function(add_mesh SOURCE TARGET)
 endfunction()
 
 add_mesh("assets/models/monkey/monkey.obj" "suzanne.filamesh")
-add_mesh("third_party/models/helmet/FlightHelmet.gltf" "helmet.filamesh")
 add_mesh("third_party/models/shader_ball/shader_ball.obj" "shader_ball.filamesh")
 
 # Generate IBL and skybox images using cmgen.
 set(CMGEN_ARGS -x . --format=ktx --size=256 --extract-blur=0.1)
 set(CMGEN_ARGS_TINY -x . --format=ktx --size=64 --extract-blur=0.1)
-set(CMGEN_ARGS_S3TC ${CMGEN_ARGS} --compression=s3tc_rgba_dxt5)
-set(CMGEN_ARGS_ETC ${CMGEN_ARGS} --compression=etc_rgba8_rgba_40)
 function(add_envmap SOURCE TARGET)
     set(source_envmap "${ROOT_DIR}/${SOURCE}")
 
@@ -129,9 +128,6 @@ function(add_envmap SOURCE TARGET)
 
     set(target_skybox "${SERVER_DIR}/${TARGET}/${TARGET}_skybox.ktx")
     set(target_envmap "${SERVER_DIR}/${TARGET}/${TARGET}_ibl.ktx")
-
-    set(target_envmap_etc "${SERVER_DIR}/${TARGET}/${TARGET}_ibl_etc.ktx")
-    set(target_envmap_s3tc "${SERVER_DIR}/${TARGET}/${TARGET}_ibl_s3tc.ktx")
 
     set(target_skybox_tiny "${SERVER_DIR}/${TARGET}/${TARGET}_skybox_tiny.ktx")
 
@@ -142,14 +138,6 @@ function(add_envmap SOURCE TARGET)
 
     add_custom_command(OUTPUT ${target_skybox} ${target_skybox_tiny}
                 ${target_envmap} ${target_envmap_etc} ${target_envmap_s3tc}
-
-        # First create an S3TC-encoded envmap, then rename it.
-        COMMAND cmgen ${CMGEN_ARGS_S3TC} ${source_envmap}
-        COMMAND mv ${target_envmap} ${target_envmap_s3tc}
-
-        # Now create an ETC-encoded envmap, then rename it.
-        COMMAND cmgen ${CMGEN_ARGS_ETC} ${source_envmap}
-        COMMAND mv ${target_envmap} ${target_envmap_etc}
 
         # Create a low-resolution skybox, then rename it.
         COMMAND cmgen ${CMGEN_ARGS_TINY} ${source_envmap}

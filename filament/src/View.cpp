@@ -23,6 +23,7 @@
 #include "details/IndirectLight.h"
 #include "details/MaterialInstance.h"
 #include "details/Renderer.h"
+#include "details/RenderTarget.h"
 #include "details/Scene.h"
 #include "details/Skybox.h"
 
@@ -32,21 +33,22 @@
 #include <private/filament/UibGenerator.h>
 
 #include <utils/Allocator.h>
-#include <utils/Systrace.h>
 #include <utils/Profiler.h>
 #include <utils/Slice.h>
+#include <utils/Systrace.h>
 
 #include <math/scalar.h>
 #include <math/fast.h>
 
 #include <memory>
 
+
 using namespace filament::math;
 using namespace utils;
 
 namespace filament {
 
-using namespace driver;
+using namespace backend;
 
 namespace details {
 
@@ -69,8 +71,8 @@ FView::FView(FEngine& engine)
             &engine.debug.view.camera_at_origin);
 
     // set-up samplers
-    mPerViewSb.setSampler(PerViewSib::RECORDS, mFroxelizer.getRecordBuffer());
-    mPerViewSb.setSampler(PerViewSib::FROXELS, mFroxelizer.getFroxelBuffer());
+    mFroxelizer.getRecordBuffer().setSampler(PerViewSib::RECORDS, mPerViewSb);
+    mFroxelizer.getFroxelBuffer().setSampler(PerViewSib::FROXELS, mPerViewSb);
     if (engine.getDFG()->isValid()) {
         TextureSampler sampler(TextureSampler::MagFilter::LINEAR);
         mPerViewSb.setSampler(PerViewSib::IBL_DFG_LUT,
@@ -79,8 +81,8 @@ FView::FView(FEngine& engine)
     mPerViewSbh = driver.createSamplerGroup(mPerViewSb.getSize());
 
     // allocate ubos
-    mPerViewUbh = driver.createUniformBuffer(mPerViewUb.getSize(), driver::BufferUsage::DYNAMIC);
-    mLightUbh = driver.createUniformBuffer(CONFIG_MAX_LIGHT_COUNT * sizeof(LightsUib), driver::BufferUsage::DYNAMIC);
+    mPerViewUbh = driver.createUniformBuffer(mPerViewUb.getSize(), backend::BufferUsage::DYNAMIC);
+    mLightUbh = driver.createUniformBuffer(CONFIG_MAX_LIGHT_COUNT * sizeof(LightsUib), backend::BufferUsage::DYNAMIC);
 
     mIsDynamicResolutionSupported = driver.isFrameTimeSupported();
 }
@@ -159,7 +161,7 @@ void move_backward(InputIterator first, InputIterator last, OutputIterator resul
     }
 }
 
-math::float2 FView::updateScale(duration frameTime) noexcept {
+float2 FView::updateScale(duration frameTime) noexcept {
     DynamicResolutionOptions const& options = mDynamicResolution;
     if (options.enabled) {
 
@@ -277,7 +279,7 @@ bool FView::isSkyboxVisible() const noexcept {
     return skybox != nullptr && (skybox->getLayerMask() & mVisibleLayers);
 }
 
-void FView::prepareShadowing(FEngine& engine, driver::DriverApi& driver,
+void FView::prepareShadowing(FEngine& engine, backend::DriverApi& driver,
         FScene::RenderableSoa& renderableData, FScene::LightSoa const& lightData) noexcept {
     SYSTRACE_CALL();
 
@@ -305,14 +307,10 @@ void FView::prepareShadowing(FEngine& engine, driver::DriverApi& driver,
             mat4f const& lightFromWorldMatrix = shadowMap.getLightSpaceMatrix();
             u.setUniform(offsetof(PerViewUib, lightFromWorldMatrix), lightFromWorldMatrix);
 
-            // the 2x bias is needed in opengl because the depth maps to -1/1. It may not be
-            // needed with other APIs, but at least it won't worsen the acnee there.
-            const float sceneRange = shadowMap.getSceneRange();
             const float texelSizeWorldSpace = shadowMap.getTexelSizeWorldSpace();
-            const float constantBias = lcm.getShadowConstantBias(directionalLight);
             const float normalBias = lcm.getShadowNormalBias(directionalLight);
             u.setUniform(offsetof(PerViewUib, shadowBias),
-                    float3{ 2 * constantBias / sceneRange, normalBias * texelSizeWorldSpace, 0 });
+                    float3{ 0, normalBias * texelSizeWorldSpace, 0 });
         }
     }
 }
@@ -341,7 +339,9 @@ void FView::prepareLighting(FEngine& engine, FEngine::DriverApi& driver, ArenaSc
 
     // IBL
     FIndirectLight const* const ibl = scene->getIndirectLight();
-    if (ibl) {
+    if (UTILS_LIKELY(ibl)) {
+        float2 iblMaxMipLevel{ ibl->getMaxMipLevel(), 1u << ibl->getMaxMipLevel() };
+        u.setUniform(offsetof(PerViewUib, iblMaxMipLevel), iblMaxMipLevel);
         u.setUniform(offsetof(PerViewUib, iblLuminance), ibl->getIntensity() * exposure);
         u.setUniformArray(offsetof(PerViewUib, iblSH), ibl->getSH(), 9);
         if (ibl->getReflectionMap()) {
@@ -352,8 +352,9 @@ void FView::prepareLighting(FEngine& engine, FEngine::DriverApi& driver, ArenaSc
                     { ibl->getReflectionMap(), reflectionSamplerParams });
         }
     } else {
-        u.setUniform(offsetof(PerViewUib, iblLuminance),
-                FIndirectLight::DEFAULT_INTENSITY * exposure);
+        FSkybox const* const skybox = scene->getSkybox();
+        const float intensity = skybox ? skybox->getIntensity() : FIndirectLight::DEFAULT_INTENSITY;
+        u.setUniform(offsetof(PerViewUib, iblLuminance), intensity * exposure);
     }
 
     // Directional light (always at index 0)
@@ -399,8 +400,8 @@ void FView::prepareLighting(FEngine& engine, FEngine::DriverApi& driver, ArenaSc
     }
 }
 
-void FView::prepare(FEngine& engine, driver::DriverApi& driver, ArenaScope& arena,
-        filament::Viewport const& viewport, filament::math::float4 const& userTime) noexcept {
+void FView::prepare(FEngine& engine, backend::DriverApi& driver, ArenaScope& arena,
+        filament::Viewport const& viewport, float4 const& userTime) noexcept {
     JobSystem& js = engine.getJobSystem();
 
     /*
@@ -540,7 +541,7 @@ void FView::prepare(FEngine& engine, driver::DriverApi& driver, ArenaScope& aren
             mRenderableUBOSize = uint32_t(count * sizeof(PerRenderableUib));
             driver.destroyUniformBuffer(mRenderableUbh);
             mRenderableUbh = driver.createUniformBuffer(mRenderableUBOSize,
-                    driver::BufferUsage::STREAM);
+                    backend::BufferUsage::STREAM);
         } else {
             // TODO: should we shrink the underlying UBO at some point?
         }
@@ -610,7 +611,7 @@ void FView::prepareCamera(const CameraInfo& camera, const filament::Viewport& vi
     const mat4f projectionMatrix(camera.projection);
 
     const mat4f clipFromView(projectionMatrix);
-    const mat4f viewFromClip(Camera::inverseProjection(clipFromView));
+    const mat4f viewFromClip(inverse(clipFromView));
     const mat4f clipFromWorld(clipFromView * viewFromWorld);
     const mat4f worldFromClip(worldFromView * viewFromClip);
 
@@ -630,6 +631,16 @@ void FView::prepareCamera(const CameraInfo& camera, const filament::Viewport& vi
     u.setUniform(offsetof(PerViewUib, cameraPosition), float3{camera.getPosition()});
 }
 
+void FView::prepareSSAO(Handle<HwTexture> ssao) const noexcept {
+    SamplerParams params;
+    params.filterMag = SamplerMagFilter::LINEAR;
+    mPerViewSb.setSampler(PerViewSib::SSAO, ssao, params);
+}
+
+void FView::cleanupSSAO() const noexcept {
+    mPerViewSb.setSampler(PerViewSib::SSAO, {}, {});
+}
+
 void FView::froxelize(FEngine& engine) const noexcept {
     SYSTRACE_CALL();
 
@@ -639,9 +650,9 @@ void FView::froxelize(FEngine& engine) const noexcept {
     }
 }
 
-void FView::commitUniforms(driver::DriverApi& driver) const noexcept {
+void FView::commitUniforms(backend::DriverApi& driver) const noexcept {
     if (mPerViewUb.isDirty()) {
-        driver.updateUniformBuffer(mPerViewUbh, mPerViewUb.toBufferDescriptor(driver));
+        driver.loadUniformBuffer(mPerViewUbh, mPerViewUb.toBufferDescriptor(driver));
     }
 
     if (mPerViewSb.isDirty()) {
@@ -649,7 +660,7 @@ void FView::commitUniforms(driver::DriverApi& driver) const noexcept {
     }
 }
 
-void FView::commitFroxels(driver::DriverApi& driverApi) const noexcept {
+void FView::commitFroxels(backend::DriverApi& driverApi) const noexcept {
     if (mHasDynamicLighting) {
         mFroxelizer.commit(driverApi);
     }
@@ -843,6 +854,10 @@ void View::setShadowsEnabled(bool enabled) noexcept {
     upcast(this)->setShadowsEnabled(enabled);
 }
 
+void View::setRenderTarget(RenderTarget* renderTarget, TargetBufferFlags discard) noexcept {
+    upcast(this)->setRenderTarget(upcast(renderTarget), discard);
+}
+
 void View::setRenderTarget(TargetBufferFlags discard) noexcept {
     upcast(this)->setRenderTarget(discard);
 }
@@ -861,6 +876,22 @@ void View::setAntiAliasing(AntiAliasing type) noexcept {
 
 View::AntiAliasing View::getAntiAliasing() const noexcept {
     return upcast(this)->getAntiAliasing();
+}
+
+void View::setToneMapping(ToneMapping type) noexcept {
+    upcast(this)->setToneMapping(type);
+}
+
+View::ToneMapping View::getToneMapping() const noexcept {
+    return upcast(this)->getToneMapping();
+}
+
+void View::setDithering(Dithering dithering) noexcept {
+    upcast(this)->setDithering(dithering);
+}
+
+View::Dithering View::getDithering() const noexcept {
+    return upcast(this)->getDithering();
 }
 
 void View::setDynamicResolutionOptions(const DynamicResolutionOptions& options) noexcept {
@@ -901,6 +932,22 @@ void View::setDepthPrepass(View::DepthPrepass prepass) noexcept {
 
 void View::setDynamicLightingOptions(float zLightNear, float zLightFar) noexcept {
     upcast(this)->setDynamicLightingOptions(zLightNear, zLightFar);
+}
+
+void View::setAmbientOcclusion(View::AmbientOcclusion ambientOcclusion) noexcept {
+    upcast(this)->setAmbientOcclusion(ambientOcclusion);
+}
+
+View::AmbientOcclusion View::getAmbientOcclusion() const noexcept {
+    return upcast(this)->getAmbientOcclusion();
+}
+
+void View::setAmbientOcclusionOptions(View::AmbientOcclusionOptions const& options) noexcept {
+    upcast(this)->setAmbientOcclusionOptions(options);
+}
+
+View::AmbientOcclusionOptions const& View::getAmbientOcclusionOptions() const noexcept {
+    return upcast(this)->getAmbientOcclusionOptions();
 }
 
 

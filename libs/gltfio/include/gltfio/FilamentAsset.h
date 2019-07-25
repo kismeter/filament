@@ -68,6 +68,7 @@ public:
     /** Gets all material instances. These are already bound to renderables. */
     size_t getMaterialInstanceCount() const noexcept;
     const filament::MaterialInstance* const* getMaterialInstances() const noexcept;
+    filament::MaterialInstance* const* getMaterialInstances() noexcept;
 
     /** Gets loading instructions for vertex buffers and index buffers. */
     size_t getBufferBindingCount() const noexcept;
@@ -83,14 +84,19 @@ public:
     /**
      * Lazily creates the animation engine or returns it from the cache.
      * The animator is owned by the asset and should not be manually deleted.
-    */
+     */
     Animator* getAnimator() noexcept;
 
     /**
      * Lazily creates a single LINES renderable that draws the transformed bounding-box hierarchy
      * for diagnostic purposes. The wireframe is owned by the asset so clients should not delete it.
-    */
+     */
     utils::Entity getWireframe() noexcept;
+
+    /**
+     * Returns the Filament engine associated with the AssetLoader that created this asset.
+     */
+    filament::Engine* getEngine() const noexcept;
 
     /**
      * Reclaims CPU-side memory for URI strings, binding lists, and raw animation data.
@@ -99,6 +105,12 @@ public:
      * If using Animator, this should be called after getAnimator().
      */
     void releaseSourceData() noexcept;
+
+    /**
+     * Returns a weak reference to the underlying cgltf hierarchy. This becomes invalid after
+     * calling releaseSourceData();
+     */
+    const void* getSourceAsset() noexcept;
 
 protected:
     FilamentAsset() noexcept = default;
@@ -135,6 +147,8 @@ struct BufferBinding {
 
     bool convertBytesToShorts;   // the resource loader must convert the buffer from u8 to u16
     bool generateTrivialIndices; // the resource loader must generate indices like: 0, 1, 2, ...
+    bool generateDummyData;      // the resource loader should generate a sequence of 1.0 values
+    bool generateTangents;       // the resource loader should generate tangents
 };
 
 /** Describes a binding from a Texture to a MaterialInstance. */

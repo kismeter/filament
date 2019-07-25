@@ -19,12 +19,13 @@
 
 #include <algorithm>
 
-#include "driver/DriverApi.h"
+#include "private/backend/DriverApi.h"
 
+#include <utils/Allocator.h>
 #include <utils/compiler.h>
 #include <utils/Log.h>
 
-#include <filament/driver/BufferDescriptor.h>
+#include <backend/BufferDescriptor.h>
 
 #include <math/mat3.h>
 #include <math/mat4.h>
@@ -101,21 +102,21 @@ public:
                 std::is_same<float, T>::value ||
                 std::is_same<int32_t, T>::value ||
                 std::is_same<uint32_t, T>::value ||
-                std::is_same<filament::math::quatf, T>::value ||
-                std::is_same<filament::math::bool2, T>::value ||
-                std::is_same<filament::math::bool3, T>::value ||
-                std::is_same<filament::math::bool4, T>::value ||
-                std::is_same<filament::math::int2, T>::value ||
-                std::is_same<filament::math::int3, T>::value ||
-                std::is_same<filament::math::int4, T>::value ||
-                std::is_same<filament::math::uint2, T>::value ||
-                std::is_same<filament::math::uint3, T>::value ||
-                std::is_same<filament::math::uint4, T>::value ||
-                std::is_same<filament::math::float2, T>::value ||
-                std::is_same<filament::math::float3, T>::value ||
-                std::is_same<filament::math::float4, T>::value ||
-                std::is_same<filament::math::mat3f, T>::value ||
-                std::is_same<filament::math::mat4f, T>::value
+                std::is_same<math::quatf, T>::value ||
+                std::is_same<math::bool2, T>::value ||
+                std::is_same<math::bool3, T>::value ||
+                std::is_same<math::bool4, T>::value ||
+                std::is_same<math::int2, T>::value ||
+                std::is_same<math::int3, T>::value ||
+                std::is_same<math::int4, T>::value ||
+                std::is_same<math::uint2, T>::value ||
+                std::is_same<math::uint3, T>::value ||
+                std::is_same<math::uint4, T>::value ||
+                std::is_same<math::float2, T>::value ||
+                std::is_same<math::float3, T>::value ||
+                std::is_same<math::float4, T>::value ||
+                std::is_same<math::mat3f, T>::value ||
+                std::is_same<math::mat4f, T>::value
         >::type;
     };
 
@@ -123,8 +124,13 @@ public:
     // offset in bytes, and count is the number of elements to invalidate
     template <typename T, typename = typename is_supported_type<T>::type>
     void setUniformArray(size_t offset, T const* UTILS_RESTRICT begin, size_t count) noexcept {
-        T* UTILS_RESTRICT p = static_cast<T*>(invalidateUniforms(offset, sizeof(T) * count));
-        std::copy_n(begin, count, p);
+        // we need to align array elements to the size of a vec4 (see std140 layout)
+        constexpr size_t stride = (sizeof(T) + 0xF) & ~0xF;
+        T* UTILS_RESTRICT p = static_cast<T*>(invalidateUniforms(offset, stride * count));
+        for (size_t i = 0; i < count; i++) {
+            *p = begin[i];
+            p = utils::pointermath::add(p, stride);
+        }
     }
 
     template <typename T, typename = typename is_supported_type<T>::type>
@@ -145,20 +151,20 @@ public:
     template<typename T, typename = typename is_supported_type<T>::type>
     T const& getUniform(size_t offset) const noexcept {
         // we don't support mat3f because a specialization would force us to return by value.
-        static_assert(!std::is_same<filament::math::mat3f, T>::value, "mat3f not supported");
+        static_assert(!std::is_same<math::mat3f, T>::value, "mat3f not supported");
         return *reinterpret_cast<T const*>(static_cast<char const*>(mBuffer) + offset);
     }
 
     // helper functions
 
-    driver::BufferDescriptor toBufferDescriptor(driver::DriverApi& driver) const noexcept {
+    backend::BufferDescriptor toBufferDescriptor(backend::DriverApi& driver) const noexcept {
         return toBufferDescriptor(driver, 0, getSize());
     }
 
     // copy the UBO data and cleans the dirty bits
-    driver::BufferDescriptor toBufferDescriptor(
-            driver::DriverApi& driver, size_t offset, size_t size) const noexcept {
-        driver::BufferDescriptor p;
+    backend::BufferDescriptor toBufferDescriptor(
+            backend::DriverApi& driver, size_t offset, size_t size) const noexcept {
+        backend::BufferDescriptor p;
         p.size = size;
         p.buffer = driver.allocate(p.size); // TODO: use out-of-line buffer if too large
         memcpy(p.buffer, static_cast<const char*>(getBuffer()) + offset, p.size);
@@ -184,22 +190,9 @@ private:
     mutable bool mSomethingDirty = false;
 };
 
-// specialization for float3 (which has a different alignment)
-template<>
-inline void
-UniformBuffer::setUniformArray(size_t offset, filament::math::float3 const* begin, size_t count) noexcept {
-    filament::math::float4* p = static_cast<filament::math::float4*>(invalidateUniforms(offset,
-            sizeof(filament::math::float4) * count));
-    filament::math::float3 const* const end = begin + count;
-    while (begin != end) {
-        p->xyz = *begin++;
-        ++p;
-    }
-}
-
 // specialization for mat3f (which has a different alignment, see std140 layout rules)
 template<>
-inline void UniformBuffer::setUniform(void* addr, size_t offset, const filament::math::mat3f& v) noexcept {
+inline void UniformBuffer::setUniform(void* addr, size_t offset, const math::mat3f& v) noexcept {
     struct mat43 {
         float v[3][4];
     };

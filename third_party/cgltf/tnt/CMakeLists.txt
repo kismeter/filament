@@ -1,11 +1,13 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.10)
 project(cgltf)
 
 set(TARGET cgltf)
 
 set(PUBLIC_HDR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-set(PUBLIC_HDRS ${PUBLIC_HDR_DIR}/cgltf.h)
+set(PUBLIC_HDRS
+    ${PUBLIC_HDR_DIR}/cgltf_write.h
+    ${PUBLIC_HDR_DIR}/cgltf.h)
 
 include_directories(${PUBLIC_HDR_DIR})
 

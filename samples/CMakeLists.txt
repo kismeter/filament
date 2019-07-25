@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.10)
 project(filament-samples C ASM)
 
 set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -32,6 +32,8 @@ add_mesh("assets/models/monkey/monkey.obj" "suzanne.filamesh")
 set(MATERIAL_SRCS
         materials/bakedColor.mat
         materials/bakedTexture.mat
+        materials/pointSprites.mat
+        materials/aoPreview.mat
         materials/aiDefaultMat.mat
         materials/aiDefaultTrans.mat
         materials/depthVisualizer.mat
@@ -40,6 +42,7 @@ set(MATERIAL_SRCS
         materials/sandboxLit.mat
         materials/sandboxLitFade.mat
         materials/sandboxLitTransparent.mat
+        materials/sandboxSpecGloss.mat
         materials/sandboxSubsurface.mat
         materials/sandboxUnlit.mat
         materials/texturedLit.mat
@@ -51,22 +54,13 @@ endif()
 
 file(MAKE_DIRECTORY ${MATERIAL_DIR})
 
-set(MATC_TARGET desktop)
-
-# Optimize materials for performance in Release mode.
-set(MATC_FLAGS -a all)
-if (NOT CMAKE_BUILD_TYPE MATCHES Release)
-    set(MATC_FLAGS -g ${MATC_FLAGS})
-endif()
-
 foreach (mat_src ${MATERIAL_SRCS})
     get_filename_component(localname "${mat_src}" NAME_WE)
     get_filename_component(fullname "${mat_src}" ABSOLUTE)
     set(output_path "${MATERIAL_DIR}/${localname}.filamat")
     add_custom_command(
             OUTPUT ${output_path}
-            COMMAND matc ${MATC_FLAGS} -p ${MATC_TARGET} -m material
-                    -o ${output_path} ${fullname}
+            COMMAND matc ${MATC_BASE_FLAGS} -m material -o ${output_path} ${fullname}
             MAIN_DEPENDENCY ${mat_src}
             DEPENDS matc
             COMMENT "Compiling material ${mat_src} to ${output_path}"
@@ -147,6 +141,33 @@ endif()
 add_library(suzanne-resources ${DUMMY_SRC} ${RESGEN_SOURCE})
 
 # ==================================================================================================
+# Resources for the gltf_viewer and lucy demos
+# ==================================================================================================
+
+get_resgen_vars(${RESOURCE_DIR} gltf)
+
+set(GLTF_RESOURCE_FILES
+    ${ROOT_DIR}/third_party/models/DamagedHelmet/DamagedHelmet.glb
+    ${ROOT_DIR}/third_party/models/lucy/lucy.glb
+    ${ROOT_DIR}/third_party/textures/Blue_tiles_01/Blue_tiles_01_AO.png
+    ${ROOT_DIR}/third_party/textures/Blue_tiles_01/Blue_tiles_01_Color.png
+    ${ROOT_DIR}/third_party/textures/Blue_tiles_01/Blue_tiles_01_Normal.png
+    ${ROOT_DIR}/third_party/textures/Blue_tiles_01/Blue_tiles_01_Roughness.png
+)
+
+add_custom_command(
+        OUTPUT ${RESGEN_OUTPUTS}
+        COMMAND resgen ${RESGEN_FLAGS} ${GLTF_RESOURCE_FILES}
+        DEPENDS resgen ${TEXTURE_FILES}
+)
+
+if (DEFINED RESGEN_SOURCE_FLAGS)
+    set_source_files_properties(${RESGEN_SOURCE} PROPERTIES COMPILE_FLAGS ${RESGEN_SOURCE_FLAGS})
+endif()
+
+add_library(gltf-resources ${DUMMY_SRC} ${RESGEN_SOURCE})
+
+# ==================================================================================================
 # Common library
 # ==================================================================================================
 
@@ -160,7 +181,6 @@ set(APP_SRCS
         app/Cube.cpp
         app/FilamentApp.cpp
         app/IBL.cpp
-        app/Image.cpp
         app/IcoSphere.cpp
         app/Sphere.cpp)
 
@@ -225,18 +245,26 @@ endfunction()
 
 if (NOT ANDROID)
     add_assimp_demo(frame_generator)
-    add_assimp_demo(gltf_viewer)
     add_assimp_demo(lightbulb)
     add_assimp_demo(material_sandbox)
     add_assimp_demo(sample_full_pbr)
 
+    add_filamesh_demo(point_sprites)
     add_filamesh_demo(sample_cloth)
     add_filamesh_demo(sample_normal_map)
     add_filamesh_demo(suzanne)
+    add_filamesh_demo(gltf_viewer)
+    add_filamesh_demo(gltf_baker)
 
     # Sample app specific
     target_link_libraries(frame_generator PRIVATE imageio)
     target_link_libraries(suzanne PRIVATE suzanne-resources)
+    target_link_libraries(gltf_viewer PRIVATE gltf-resources gltfio)
+    target_link_libraries(gltf_baker PRIVATE gltf-resources gltfio imageio)
+
+    add_executable(lucy_bloom lucy_bloom.cpp lucy_utils.h lucy_utils.cpp)
+    target_compile_options(lucy_bloom PRIVATE ${COMPILER_FLAGS})
+    target_link_libraries(lucy_bloom PRIVATE ${APP_LIBS} gltf-resources gltfio)
 endif()
 
 # ==================================================================================================

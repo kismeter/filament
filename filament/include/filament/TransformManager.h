@@ -51,7 +51,7 @@ namespace filament {
  *
  *  // set its transform
  *  auto i = tcm.getInstance(object);
- *  tcm.setTransform(i, mat4f::translate({ 0, 0, -1 }));
+ *  tcm.setTransform(i, mat4f::translation({ 0, 0, -1 }));
  *
  *  // destroy the transform component
  *  tcm.destroy(object);
@@ -90,7 +90,7 @@ public:
      *
      * @see destroy()
      */
-    void create(utils::Entity entity, Instance parent = {}, const filament::math::mat4f& localTransform = {});
+    void create(utils::Entity entity, Instance parent = {}, const math::mat4f& localTransform = {});
 
     /**
      * Destroys this component from the given entity, children are orphaned.
@@ -130,7 +130,7 @@ public:
      * Gets a list of children for a transform component.
      *
      * @param i The instance of the transform component to query.
-     * @param chidren Pointer to array-of-Entity. The array must have at least "count" elements.
+     * @param children Pointer to array-of-Entity. The array must have at least "count" elements.
      * @param count The maximum number of children to retrieve.
      * @return The number of children written to the pointer.
      */
@@ -145,7 +145,7 @@ public:
      *            will be particularly bad when updating a lot of transforms. In that case,
      *            consider using openLocalTransformTransaction() / commitLocalTransformTransaction().
      */
-    void setTransform(Instance ci, const filament::math::mat4f& localTransform) noexcept;
+    void setTransform(Instance ci, const math::mat4f& localTransform) noexcept;
 
     /**
      * Returns the local transform of a transform component.
@@ -154,7 +154,7 @@ public:
      *         returns the value set by setTransform().
      * @see setTransform()
      */
-    const filament::math::mat4f& getTransform(Instance ci) const noexcept;
+    const math::mat4f& getTransform(Instance ci) const noexcept;
 
     /**
      * Return the world transform of a transform component.
@@ -164,7 +164,7 @@ public:
      *         transform.
      * @see setTransform()
      */
-    const filament::math::mat4f& getWorldTransform(Instance ci) const noexcept;
+    const math::mat4f& getWorldTransform(Instance ci) const noexcept;
 
     /**
      * Opens a local transform transaction. During a transaction, getWorldTransform() can

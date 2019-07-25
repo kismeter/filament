@@ -19,6 +19,7 @@
 
 #include <filament/Engine.h>
 #include <filament/IndirectLight.h>
+#include <filament/LightManager.h>
 #include <filament/RenderableManager.h>
 #include <filament/Renderer.h>
 #include <filament/Scene.h>
@@ -47,8 +48,6 @@ private:
 
     void updateRotation();
 
-    static void parseSphereHarmonics(const char* str, filament::math::float3 harmonics[9]);
-
     void* nativeLayer = nullptr;
     uint32_t width, height;
 
@@ -73,6 +72,7 @@ private:
         Texture* skyboxTexture = nullptr;
         Skybox* skybox = nullptr;
         Entity renderable;
+        Entity sun;
     } app;
 
     CameraManipulator cameraManipulator;

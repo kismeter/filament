@@ -26,8 +26,10 @@ Afterwards, you should find all the Filament libraries inside of `out/ios-debug/
 libfilabridge.a
 libfilaflat.a
 libfilament.a
+libbackend.a
 libutils.a
 libsmol-v.a
+libgeometry.a
 ```
 
 The sample applications expect the libraries to be present here. Likewise, when building the sample
@@ -48,12 +50,17 @@ When building for the simulator, the sample will then link against the libraries
 ## Xcode
 
 Open up one of the Xcode projects:
-    - hello-triangle/hello-triangle.xcodeproj
-    - hello-pbr/hello-pbr.xcodeproj
 
-Each project contains two schemes, `*-Metal` and `*-OpenGL`, which use the Metal and OpenGL backends
-respectively. Before building you will need to select one of the schemes, sign in to your Apple
-developer account, and select an appropriate development team in the project editor.
+- hello-ar/hello-ar.xcodeproj
+- hello-gltf/hello-gltf.xcodeproj
+- hello-pbr/hello-pbr.xcodeproj
+- hello-triangle/hello-triangle.xcodeproj
+- transparent-rendering/transparent-rendering.xcodeproj
+
+Each project contains two schemes, `<sample> Metal` and `<sample> OpenGL`, which use the Metal and
+OpenGL backends respectively. Before building you will need to select one of the schemes, sign in to
+your Apple developer account, select an appropriate development team in the project editor, and
+change the bundle identifier to a unique name.
 
 ## Building
 
@@ -68,3 +75,16 @@ the `out` directory.
 
 Before reporting build errors, please try cleaning the CMake directories first and building again
 from scratch.
+
+## XcodeGen
+
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) is used to generate the Xcode projects. While not
+required to run the samples, XcodeGen makes modifying them easier. Each sample folder contains the
+`project.yml` file used for the sample, which includes a global `app-template.yml` file. Simply run
+
+```
+$ xcodegen
+```
+
+within a sample folder to re-generate the Xcode project. You may need to close and re-open the
+project in Xcode to see changes take effect.

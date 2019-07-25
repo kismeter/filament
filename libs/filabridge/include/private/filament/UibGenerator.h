@@ -64,7 +64,7 @@ struct PerViewUib { // NOLINT(cppcoreguidelines-pro-type-member-init)
     filament::math::float3 lightDirection;
     uint32_t fParamsX; // stride-x
 
-    filament::math::float3 shadowBias; // constant bias, normal bias, unused
+    filament::math::float3 shadowBias; // unused, normal bias, unused
     float oneOverFroxelDimensionY;
 
     filament::math::float4 zParams; // froxel Z parameters
@@ -80,6 +80,12 @@ struct PerViewUib { // NOLINT(cppcoreguidelines-pro-type-member-init)
     alignas(16) filament::math::float4 iblSH[9]; // actually float3 entries (std140 requires float4 alignment)
 
     filament::math::float4 userTime;  // time(s), (double)time - (float)time, 0, 0
+
+    filament::math::float2 iblMaxMipLevel; // maxlevel, float(1<<maxlevel)
+    filament::math::float2 padding0;
+
+    // bring PerViewUib to 1 KiB
+    filament::math::float4 padding1[16];
 };
 
 
@@ -105,7 +111,7 @@ struct PostProcessingUib {
     }
     filament::math::float2 uvScale;
     float time;             // time in seconds, with a 1 second period, used for dithering
-    float yOffset;
+    int dithering;          // type of dithering 0=none, 1=enabled
 };
 
 // This is not the UBO proper, but just an element of a bone array.

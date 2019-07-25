@@ -48,6 +48,11 @@ export interface Box {
     halfExtent: float3;
 }
 
+export interface Aabb {
+    min: float3;
+    max: float3;
+}
+
 export class LightManager$Instance {
     public delete(): void;
 }
@@ -70,8 +75,11 @@ export class MaterialInstance {
     public setFloat3Parameter(name: string, value: float3): void;
     public setFloat4Parameter(name: string, value: float4): void;
     public setTextureParameter(name: string, value: Texture, sampler: TextureSampler): void;
-    public setColorParameter(name: string, ctype: RgbType, value: float3): void;
+    public setColor3Parameter(name: string, ctype: RgbType, value: float3): void;
+    public setColor4Parameter(name: string, ctype: RgbaType, value: float4): void;
     public setPolygonOffset(scale: number, constant: number): void;
+    public setMaskThreshold(threshold: number): void;
+    public setDoubleSided(doubleSided: boolean): void;
 }
 
 export class EntityManager {
@@ -114,6 +122,14 @@ export class RenderableManager$Builder {
     public skinningMatrices(transforms: mat4[]): RenderableManager$Builder;
     public blendOrder(index: number, order: number): RenderableManager$Builder;
     public build(engine: Engine, entity: Entity): void;
+}
+
+export class RenderTarget$Builder {
+    public texture(attachment: RenderTarget$AttachmentPoint, texture: Texture): RenderTarget$Builder;
+    public mipLevel(attachment: RenderTarget$AttachmentPoint, mipLevel: number): RenderTarget$Builder;
+    public face(attachment: RenderTarget$AttachmentPoint, face: Texture$CubemapFace): RenderTarget$Builder;
+    public layer(attachment: RenderTarget$AttachmentPoint, layer: number): RenderTarget$Builder;
+    public build(engine: Engine): RenderTarget;
 }
 
 export class LightManager$Builder {
@@ -224,6 +240,13 @@ export class IndirectLight {
     public setIntensity(intensity: number);
 }
 
+export class IcoSphere {
+    constructor(nsubdivs: number);
+    vertices: Float32Array;
+    tangents: Uint16Array;
+    triangles: Uint16Array;
+}
+
 export class Scene {
     public addEntity(entity: Entity);
     public getLightCount(): number;
@@ -233,11 +256,18 @@ export class Scene {
     public setSkybox(sky: Skybox);
 }
 
+export class RenderTarget {
+    public getMipLevel(): number;
+    public getFace(): Texture$CubemapFace;
+    public getLayer(): number;
+}
+
 export class View {
     public setCamera(camera: Camera);
     public setClearColor(color: float4);
     public setScene(scene: Scene);
     public setViewport(viewport: float4);
+    public setRenderTarget(renderTarget: RenderTarget);
 }
 
 export class TransformManager {
@@ -271,8 +301,23 @@ export class Engine {
     public createTextureFromJpeg(url: string): Texture;
     public createTextureFromPng(url: string): Texture;
     public createView(): View;
+
+    public destroySwapChain(swapChain: SwapChain): void;
+    public destroyRenderer(renderer: Renderer): void;
+    public destroyView(view: View): void;
+    public destroyScene(scene: Scene): void;
+    public destroyCamera(camera: Camera): void;
+    public destroyMaterial(material: Material): void;
+    public destroyEntity(entity: Entity): void;
+    public destroyIndexBuffer(indexBuffer: IndexBuffer): void;
+    public destroyIndirectLight(indirectLight: IndirectLight): void;
+    public destroyMaterialInstance(materialInstance: MaterialInstance): void;
+    public destroyRenderTarget(renderTarget: RenderTarget): void;
     public destroySkybox(skybox: Skybox): void;
+    public destroyTexture(texture: Texture): void;
+
     public getLightManager(): LightManager;
+    public destroyVertexBuffer(vertexBuffer: VertexBuffer): void;
     public getRenderableManager(): RenderableManager;
     public getSupportedFormatSuffix(suffix: string): void;
     public getTransformManager(): TransformManager;
@@ -380,7 +425,7 @@ export enum PixelDataFormat {
     RGB_INTEGER,
     RGBA,
     RGBA_INTEGER,
-    RGBM,
+    UNUSED,
     DEPTH_COMPONENT,
     DEPTH_STENCIL,
     ALPHA,
@@ -528,6 +573,11 @@ export enum Texture$Usage {
     DEPTH_ATTACHMENT,
 }
 
+export enum RenderTarget$AttachmentPoint {
+    COLOR,
+    DEPTH,
+}
+
 export enum VertexAttribute {
     POSITION,
     TANGENTS,
@@ -536,6 +586,14 @@ export enum VertexAttribute {
     UV1,
     BONE_INDICES,
     BONE_WEIGHTS,
+    CUSTOM0,
+    CUSTOM1,
+    CUSTOM2,
+    CUSTOM3,
+    CUSTOM4,
+    CUSTOM5,
+    CUSTOM6,
+    CUSTOM7,
 }
 
 export enum VertexBuffer$AttributeType {

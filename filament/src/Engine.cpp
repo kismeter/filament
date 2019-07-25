@@ -31,7 +31,8 @@
 #include "details/SwapChain.h"
 #include "details/Texture.h"
 #include "details/View.h"
-#include "driver/Program.h"
+
+#include "private/backend/Program.h"
 
 #include <private/filament/SibGenerator.h>
 
@@ -39,6 +40,7 @@
 #include <filament/MaterialEnums.h>
 
 #include <MaterialParser.h>
+
 #include <filaflat/ShaderBuilder.h>
 
 #include <utils/compiler.h>
@@ -61,7 +63,7 @@ using namespace utils;
 
 namespace filament {
 
-using namespace driver;
+using namespace backend;
 using namespace filaflat;
 
 namespace details {
@@ -85,8 +87,9 @@ FEngine* FEngine::create(Backend backend, Platform* platform, void* sharedGLCont
         // we don't own the external context at that point, set it to null
         instance->mPlatform = nullptr;
         if (platform == nullptr) {
-            platform = Platform::create(&instance->mBackend);
+            platform = DefaultPlatform::create(&instance->mBackend);
             instance->mPlatform = platform;
+            instance->mOwnPlatform = true;
         }
         instance->mDriver = platform->createDriver(sharedGLContext);
         instance->init();
@@ -127,6 +130,7 @@ FEngine::FEngine(Backend backend, Platform* platform, void* sharedGLContext) :
         mBackend(backend),
         mPlatform(platform),
         mSharedGLContext(sharedGLContext),
+        mPostProcessManager(*this),
         mEntityManager(EntityManager::get()),
         mRenderableManager(*this),
         mTransformManager(),
@@ -188,19 +192,18 @@ void FEngine::init() {
     driverApi.setRenderPrimitiveBuffer(mFullScreenTriangleRph,
             mFullScreenTriangleVb->getHwHandle(), mFullScreenTriangleIb->getHwHandle(),
             mFullScreenTriangleVb->getDeclaredAttributes().getValue());
-    driverApi.setRenderPrimitiveRange(mFullScreenTriangleRph, Driver::PrimitiveType::TRIANGLES,
+    driverApi.setRenderPrimitiveRange(mFullScreenTriangleRph, PrimitiveType::TRIANGLES,
             0, 0, 2, (uint32_t)mFullScreenTriangleIb->getIndexCount());
 
     mDefaultIblTexture = upcast(Texture::Builder()
             .width(1).height(1).levels(1)
             .format(Texture::InternalFormat::RGBA8)
-            .rgbm(true)
             .sampler(Texture::Sampler::SAMPLER_CUBEMAP)
             .build(*this));
     static uint32_t pixel = 0;
     Texture::PixelBufferDescriptor buffer(
-            &pixel, 4, // 4 bytes in 1 RGBM pixel
-            Texture::Format::RGBM, Texture::Type::UBYTE);
+            &pixel, 4, // 4 bytes in 1 RGBA pixel
+            Texture::Format::RGBA, Texture::Type::UBYTE);
     Texture::FaceOffsets offsets = {};
     mDefaultIblTexture->setImage(*this, 0, std::move(buffer), offsets);
 
@@ -212,21 +215,23 @@ void FEngine::init() {
             .intensity(1.0f)
             .build(*this));
 
-    mPostProcessManager.init(*this);
-    mLightManager.init(*this);
-    mDFG.reset(new DFG(*this));
-
     // Always initialize the default material, most materials' depth shaders fallback on it.
     mDefaultMaterial = upcast(
             FMaterial::DefaultMaterialBuilder()
                     .package(MATERIALS_DEFAULTMATERIAL_DATA, MATERIALS_DEFAULTMATERIAL_SIZE)
                     .build(*const_cast<FEngine*>(this)));
+
+    mPostProcessManager.init();
+    mLightManager.init(*this);
+    mDFG.reset(new DFG(*this));
 }
 
 FEngine::~FEngine() noexcept {
     ASSERT_DESTRUCTOR(mTerminated, "Engine destroyed but not terminated!");
     delete mDriver;
-    Platform::destroy(&mPlatform);
+    if (mOwnPlatform) {
+        DefaultPlatform::destroy((DefaultPlatform**)&mPlatform);
+    }
 }
 
 void FEngine::shutdown() {
@@ -272,13 +277,12 @@ void FEngine::shutdown() {
     cleanupResourceList(mSkyboxes);
 
     // this must be done after Skyboxes and before materials
-    for (FMaterial const* material : mSkyboxMaterials) {
-        destroy(material);
-    }
+    destroy(mSkyboxMaterial);
 
     cleanupResourceList(mIndexBuffers);
     cleanupResourceList(mVertexBuffers);
     cleanupResourceList(mTextures);
+    cleanupResourceList(mRenderTargets);
     cleanupResourceList(mMaterials);
     for (auto& item : mMaterialInstances) {
         cleanupResourceList(item.second);
@@ -315,15 +319,16 @@ void FEngine::prepare() {
     // prepare() is called once per Renderer frame. Ideally we would upload the content of
     // UBOs that are visible only. It's not such a big issue because the actual upload() is
     // skipped is the UBO hasn't changed. Still we could have a lot of these.
+    FEngine::DriverApi& driver = getDriverApi();
     for (auto& materialInstanceList : mMaterialInstances) {
         for (auto& item : materialInstanceList.second) {
-            item->commit(*this);
+            item->commit(driver);
         }
     }
 
     // Commit default material instances.
     for (auto& material : mMaterials) {
-        material->getDefaultInstance()->commit(*this);
+        material->getDefaultInstance()->commit(driver);
     }
 }
 
@@ -359,19 +364,24 @@ int FEngine::loop() {
     mPlatform = nullptr;
 
     if (platform == nullptr) {
-        platform = Platform::create(&mBackend);
+        platform = DefaultPlatform::create(&mBackend);
         mPlatform = platform;
+        mOwnPlatform = true;
         slog.d << "FEngine resolved backend: ";
         switch (mBackend) {
-            case driver::Backend::OPENGL:
+            case backend::Backend::NOOP:
+                slog.d << "Noop";
+                break;
+
+            case backend::Backend::OPENGL:
                 slog.d << "OpenGL";
                 break;
 
-            case driver::Backend::VULKAN:
+            case backend::Backend::VULKAN:
                 slog.d << "Vulkan";
                 break;
 
-            case driver::Backend::METAL:
+            case backend::Backend::METAL:
                 slog.d << "Metal";
                 break;
 
@@ -416,18 +426,17 @@ void FEngine::flushCommandBuffer(CommandBufferQueue& commandQueue) {
     commandQueue.flush();
 }
 
-const FMaterial* FEngine::getSkyboxMaterial(bool rgbm) const noexcept {
-    size_t index = rgbm ? 0 : 1;
-    FMaterial const* material = mSkyboxMaterials[index];
+const FMaterial* FEngine::getSkyboxMaterial() const noexcept {
+    FMaterial const* material = mSkyboxMaterial;
     if (UTILS_UNLIKELY(material == nullptr)) {
-        material = FSkybox::createMaterial(*const_cast<FEngine*>(this), rgbm);
-        mSkyboxMaterials[index] = material;
+        material = FSkybox::createMaterial(*const_cast<FEngine*>(this));
+        mSkyboxMaterial = material;
     }
     return material;
 }
 
 
-Handle<HwProgram> FEngine::createPostProcessProgram(MaterialParser& parser,
+backend::Handle<backend::HwProgram> FEngine::createPostProcessProgram(MaterialParser& parser,
         ShaderModel shaderModel, PostProcessStage stage) const noexcept {
     ShaderBuilder& vShaderBuilder = getVertexShaderBuilder();
     ShaderBuilder& fShaderBuilder = getFragmentShaderBuilder();
@@ -438,10 +447,9 @@ Handle<HwProgram> FEngine::createPostProcessProgram(MaterialParser& parser,
     // need to populate a SamplerBindingMap and pass a weak reference to Program. Binding maps are
     // normally owned by Material, but in this case we'll simply own a copy right here in static
     // storage.
-    static const SamplerBindingMap* pBindings = [backend = this->mBackend] {
+    static const SamplerBindingMap* pBindings = [] {
         static SamplerBindingMap bindings;
-        uint8_t offset = filament::getSamplerBindingsStart(backend);
-        bindings.populate(offset);
+        bindings.populate();
         return &bindings;
     }();
 
@@ -477,8 +485,8 @@ Handle<HwProgram> FEngine::createPostProcessProgram(MaterialParser& parser,
     return program;
 }
 
-Handle<HwProgram> FEngine::getPostProcessProgramSlow(PostProcessStage stage) const noexcept {
-    Handle<HwProgram>* const postProcessPrograms = mPostProcessPrograms;
+backend::Handle<backend::HwProgram> FEngine::getPostProcessProgramSlow(PostProcessStage stage) const noexcept {
+    backend::Handle<backend::HwProgram>* const postProcessPrograms = mPostProcessPrograms;
     if (!postProcessPrograms[(uint8_t)stage]) {
         ShaderModel shaderModel = getDriver().getShaderModel();
         postProcessPrograms[(uint8_t)stage] = createPostProcessProgram(*mPostProcessParser, shaderModel, stage);
@@ -528,6 +536,10 @@ FSkybox* FEngine::createSkybox(const Skybox::Builder& builder) noexcept {
 
 FStream* FEngine::createStream(const Stream::Builder& builder) noexcept {
     return create(mStreams, builder);
+}
+
+FRenderTarget* FEngine::createRenderTarget(const RenderTarget::Builder& builder) noexcept {
+    return create(mRenderTargets, builder);
 }
 
 /*
@@ -686,6 +698,10 @@ void FEngine::destroy(const FTexture* p) {
     terminateAndDestroy(p, mTextures);
 }
 
+void FEngine::destroy(const FRenderTarget* p) {
+    terminateAndDestroy(p, mRenderTargets);
+}
+
 inline void FEngine::destroy(const FView* p) {
     terminateAndDestroy(p, mViews);
 }
@@ -708,7 +724,7 @@ void FEngine::destroy(const FStream* p) {
 }
 
 
-inline void FEngine::destroy(const FMaterial* ptr) {
+void FEngine::destroy(const FMaterial* ptr) {
     if (ptr != nullptr) {
         auto pos = mMaterialInstances.find(ptr);
         if (pos != mMaterialInstances.cend()) {
@@ -723,7 +739,7 @@ inline void FEngine::destroy(const FMaterial* ptr) {
     }
 }
 
-inline void FEngine::destroy(const FMaterialInstance* ptr) {
+void FEngine::destroy(const FMaterialInstance* ptr) {
     if (ptr != nullptr) {
         auto pos = mMaterialInstances.find(ptr->getMaterial());
         assert(pos != mMaterialInstances.cend());
@@ -788,6 +804,10 @@ Engine* Engine::create(Backend backend, Platform* platform, void* sharedGLContex
     return handle;
 }
 
+void Engine::destroy(Engine* engine) {
+    destroy(&engine);
+}
+
 void Engine::destroy(Engine** engine) {
     if (engine) {
         std::unique_ptr<FEngine> filamentEngine;
@@ -815,6 +835,10 @@ void Engine::destroy(Engine** engine) {
 
 const Material* Engine::getDefaultMaterial() const noexcept {
     return upcast(this)->getDefaultMaterial();
+}
+
+Backend Engine::getBackend() const noexcept {
+    return upcast(this)->getBackend();
 }
 
 Renderer* Engine::createRenderer() noexcept {
@@ -890,6 +914,10 @@ void Engine::destroy(const Stream* p) {
 }
 
 void Engine::destroy(const Texture* p) {
+    upcast(this)->destroy(upcast(p));
+}
+
+void Engine::destroy(const RenderTarget* p) {
     upcast(this)->destroy(upcast(p));
 }
 

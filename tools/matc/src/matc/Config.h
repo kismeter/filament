@@ -18,7 +18,7 @@
 #define TNT_CONFIG_H
 
 #include <filament/MaterialEnums.h>
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 
 #include <filamat/MaterialBuilder.h>
 
@@ -128,7 +128,7 @@ protected:
     Mode mMode = Mode::MATERIAL;
     Platform mPlatform = Platform::ALL;
     OutputFormat mOutputFormat = OutputFormat::BLOB;
-    TargetApi mTargetApi = TargetApi::OPENGL;
+    TargetApi mTargetApi = (TargetApi) 0;
     uint8_t mVariantFilter = 0;
 };
 

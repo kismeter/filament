@@ -24,8 +24,7 @@
 #include <string>
 #include <vector>
 
-#include <filament/driver/DriverEnums.h>
-#include <private/filament/EngineEnums.h>
+#include <backend/DriverEnums.h>
 #include <filament/MaterialEnums.h>
 
 #include <filamat/Package.h>
@@ -37,6 +36,8 @@
 namespace filamat {
 
 struct MaterialInfo;
+class ChunkContainer;
+struct Variant;
 
 class UTILS_PUBLIC MaterialBuilderBase {
 public:
@@ -48,11 +49,16 @@ public:
         ALL
     };
 
-    enum class TargetApi {
-        ALL,
-        OPENGL,
-        VULKAN,
-        METAL
+    enum class TargetApi : uint8_t {
+        OPENGL      = 0x01u,
+        VULKAN      = 0x02u,
+        METAL       = 0x04u,
+        ALL         = OPENGL | VULKAN | METAL
+    };
+
+    enum class TargetLanguage {
+        GLSL,
+        SPIRV
     };
 
     enum class Optimization {
@@ -73,16 +79,16 @@ protected:
     // Looks at platform and target API, then decides on shader models and output formats.
     void prepare();
 
-    using ShaderModel = filament::driver::ShaderModel;
+    using ShaderModel = filament::backend::ShaderModel;
     Platform mPlatform = Platform::DESKTOP;
-    TargetApi mTargetApi = TargetApi::OPENGL;
+    TargetApi mTargetApi = (TargetApi) 0;
     Optimization mOptimization = Optimization::PERFORMANCE;
     bool mPrintShaders = false;
     utils::bitset32 mShaderModels;
     struct CodeGenParams {
         int shaderModel;
         TargetApi targetApi;
-        TargetApi codeGenTargetApi;
+        TargetLanguage targetLanguage;
     };
     std::vector<CodeGenParams> mCodeGenPermutations;
     uint8_t mVariantFilter = 0;
@@ -93,6 +99,21 @@ protected:
     // attempting to build a material.
     static std::atomic<int> materialBuilderClients;
 };
+
+inline constexpr MaterialBuilderBase::TargetApi operator|(MaterialBuilderBase::TargetApi lhs,
+        MaterialBuilderBase::TargetApi rhs) noexcept {
+    return MaterialBuilderBase::TargetApi(uint8_t(lhs) | uint8_t(rhs));
+}
+
+inline constexpr MaterialBuilderBase::TargetApi operator|=(MaterialBuilderBase::TargetApi& lhs,
+        MaterialBuilderBase::TargetApi rhs) noexcept {
+    return lhs = (lhs | rhs);
+}
+
+inline constexpr bool operator&(MaterialBuilderBase::TargetApi lhs,
+        MaterialBuilderBase::TargetApi rhs) noexcept {
+    return bool(uint8_t(lhs) & uint8_t(rhs));
+}
 
 class UTILS_PUBLIC MaterialBuilder : public MaterialBuilderBase {
 public:
@@ -107,7 +128,7 @@ public:
         // when adding more variables, make sure to update MATERIAL_VARIABLES_COUNT
     };
 
-    static constexpr size_t MATERIAL_PROPERTIES_COUNT = 16;
+    static constexpr size_t MATERIAL_PROPERTIES_COUNT = 19;
     enum class Property : uint8_t {
         BASE_COLOR,              // float4, all shading models
         ROUGHNESS,               // float,  lit shading models only
@@ -123,8 +144,11 @@ public:
         SUBSURFACE_POWER,        // float,  subsurface shading model only
         SUBSURFACE_COLOR,        // float3, subsurface and cloth shading models only
         SHEEN_COLOR,             // float3, cloth shading model only
+        SPECULAR_COLOR,          // float3, specular-glossiness shading model only
+        GLOSSINESS,              // float,  specular-glossiness shading model only
         EMISSIVE,                // float4, all shading models
         NORMAL,                  // float3, all shading models only, except unlit
+        POST_LIGHTING_COLOR,     // float4, all shading models
         // when adding new Properties, make sure to update MATERIAL_PROPERTIES_COUNT
     };
 
@@ -134,16 +158,17 @@ public:
     using VertexDomain = filament::VertexDomain;
     using TransparencyMode = filament::TransparencyMode;
 
-    using UniformType = filament::driver::UniformType;
-    using SamplerType = filament::driver::SamplerType;
-    using SamplerFormat = filament::driver::SamplerFormat;
-    using SamplerPrecision = filament::driver::Precision;
-    using CullingMode = filament::driver::CullingMode;
+    using UniformType = filament::backend::UniformType;
+    using SamplerType = filament::backend::SamplerType;
+    using SamplerFormat = filament::backend::SamplerFormat;
+    using SamplerPrecision = filament::backend::Precision;
+    using CullingMode = filament::backend::CullingMode;
 
     // set name of this material
     MaterialBuilder& name(const char* name) noexcept;
 
     // set the shading model
+    using MaterialDomain = filament::MaterialDomain;
     MaterialBuilder& shading(Shading shading) noexcept;
 
     // set the interpolation mode
@@ -172,17 +197,31 @@ public:
     // depends on the shading model
     MaterialBuilder& require(filament::VertexAttribute attribute) noexcept;
 
+    // specify the domain that this material will operate in
+    MaterialBuilder& materialDomain(MaterialDomain materialDomain) noexcept;
+
     // set the code content of this material
-    // must declare a function "void material(inout MaterialInputs material)"
-    // this function *must* call "prepareMaterial(material)" before it returns
+    // for materials in the SURFACE domain:
+    //     must declare a function "void material(inout MaterialInputs material)"
+    //     this function *must* call "prepareMaterial(material)" before it returns
+    // for materials in the POST_PROCESS domain:
+    //     must declare a function "void postProcess(inout PostProcessInputs postProcess)"
     MaterialBuilder& material(const char* code, size_t line = 0) noexcept;
 
     // set the vertex code content of this material
-    // must declare a function "void materialVertex(inout MaterialVertexInputs material)"
+    // for materials in the SURFACE domain:
+    //     must declare a function "void materialVertex(inout MaterialVertexInputs material)"
+    // for materials in the POST_PROCESS domain:
+    //     must declare a function "void postProcessVertex(inout PostProcessVertexInputs postProcess)"
     MaterialBuilder& materialVertex(const char* code, size_t line = 0) noexcept;
 
     // set blending mode for this material
     MaterialBuilder& blending(BlendingMode blending) noexcept;
+
+    // set blending mode of the post lighting color for this material
+    // only OPAQUE, TRANSPARENT and ADD are supported, the default is TRANSPARENT
+    // this setting requires the material property "postLightingColor" to be set
+    MaterialBuilder& postLightingBlending(BlendingMode blending) noexcept;
 
     // set vertex domain for this material
     MaterialBuilder& vertexDomain(VertexDomain domain) noexcept;
@@ -201,21 +240,34 @@ public:
 
     // double-sided materials don't cull faces, equivalent to culling(CullingMode::NONE)
     // doubleSided() overrides culling() if called
+    // when called with "false", this enables the capability for a run-time toggle
     MaterialBuilder& doubleSided(bool doubleSided) noexcept;
 
     // any fragment with an alpha below this threshold is clipped (MASKED blending mode only)
+    // the mask threshold can also be controlled by using the float material parameter
+    // called "_maskTrehshold", or by calling MaterialInstance::setMaskTreshold
     MaterialBuilder& maskThreshold(float threshold) noexcept;
 
     // the material output is multiplied by the shadowing factor (UNLIT model only)
     MaterialBuilder& shadowMultiplier(bool shadowMultiplier) noexcept;
 
-    // reduce specular aliasing by locally increasing roughness using geometric curvature
+    // reduces specular aliasing for materials that have low roughness. Turning this feature
+    // on also helps preserve the shapes of specular highlights as an object moves away from
+    // the camera. When turned on, two float material parameters are added to control the effect:
+    // "_specularAAScreenSpaceVariance" and "_specularAAThreshold". You can also use
+    // MaterialInstance::setSpecularAntiAliasingVariance and setSpecularAntiAliasingThreshold
     // disabled by default
-    MaterialBuilder& curvatureToRoughness(bool curvatureToRoughness) noexcept;
+    MaterialBuilder& specularAntiAliasing(bool specularAntiAliasing) noexcept;
 
-    // reduce specular aliasing at silhouette by preventing over-interpolation of geometric normals
-    // disabled by default
-    MaterialBuilder& limitOverInterpolation(bool limitOverInterpolation) noexcept;
+    // sets the screen space variance of the filter kernel used when applying specular
+    // anti-aliasing. The default value is set to 0.15. The specified value should be between
+    // 0 and 1 and will be clamped if necessary.
+    MaterialBuilder& specularAntiAliasingVariance(float screenSpaceVariance) noexcept;
+
+    // sets the clamping threshold used to suppress estimation errors when applying specular
+    // anti-aliasing. The default value is set to 0.2. The specified value should be between 0
+    // and 1 and will be clamped if necessary.
+    MaterialBuilder& specularAntiAliasingThreshold(float threshold) noexcept;
 
     // enables or disables the index of refraction (IoR) change caused by the clear coat layer when
     // present. When the IoR changes, the base color is darkened. Disabling this feature preserves
@@ -226,6 +278,12 @@ public:
     // enable/disable flipping of the Y coordinate of UV attributes, enabled by default
     MaterialBuilder& flipUV(bool flipUV) noexcept;
 
+    // enable/disable multi-bounce ambient occlusion, disabled by default on mobile
+    MaterialBuilder& multiBounceAmbientOcclusion(bool multiBounceAO) noexcept;
+
+    // enable/disable specular ambient occlusion, disabled by default on mobile
+    MaterialBuilder& specularAmbientOcclusion(bool specularAO) noexcept;
+
     // specifies how transparent objects should be rendered (default is DEFAULT)
     MaterialBuilder& transparencyMode(TransparencyMode mode) noexcept;
 
@@ -233,11 +291,15 @@ public:
     // (used to generate code) and final output representations (spirv and/or text).
     MaterialBuilder& platform(Platform platform) noexcept;
 
-    // specifies vulkan vs opengl; works in concert with Platform to determine the shader models
-    // (used to generate code) and final output representations (spirv and/or text).
+    // specifies opengl, vulkan, or metal
+    // This can be called repeatedly to build for multiple APIs.
+    // Works in concert with Platform to determine the shader models (used to generate code) and
+    // final output representations (spirv and/or text).
+    // If linking against filamat_lite, only "opengl" is allowed.
     MaterialBuilder& targetApi(TargetApi targetApi) noexcept;
 
     // specifies the level of optimization to apply to the shaders (default is PERFORMANCE)
+    // if linking against filamat_lite, this _must_ be called with Optimization::NONE.
     MaterialBuilder& optimization(Optimization optimization) noexcept;
 
     // if true, will output the generated GLSL shader code to stdout
@@ -276,11 +338,10 @@ public:
     using PropertyList = bool[MATERIAL_PROPERTIES_COUNT];
     using VariableList = utils::CString[MATERIAL_VARIABLES_COUNT];
 
-    // Preview the first shader that would generated in the MaterialPackage.
+    // Preview the first shader generated by the given CodeGenParams.
     // This is used to run Static Code Analysis before generating a package.
-    // Outputs the chosen shader model in the model parameter
-    const std::string peek(filament::driver::ShaderType type,
-            filament::driver::ShaderModel& model, const PropertyList& properties) noexcept;
+    const std::string peek(filament::backend::ShaderType type,
+            const CodeGenParams& params, const PropertyList& properties) noexcept;
 
     // Returns true if any of the parameter samplers is of type samplerExternal
     bool hasExternalSampler() const noexcept;
@@ -301,7 +362,16 @@ private:
 
     // Return true if:
     // The shader is syntactically and semantically valid
-    bool runStaticCodeAnalysis() noexcept;
+    bool findProperties() noexcept;
+    bool runSemanticAnalysis() noexcept;
+
+    bool checkLiteRequirements() noexcept;
+
+    void writeCommonChunks(ChunkContainer& container, MaterialInfo& info) const noexcept;
+    void writeSurfaceChunks(ChunkContainer& container) const noexcept;
+
+    bool generateShaders(const std::vector<Variant>& variants, ChunkContainer& container,
+            const MaterialInfo& info) const noexcept;
 
     bool isLit() const noexcept { return mShading != filament::Shading::UNLIT; }
 
@@ -317,8 +387,10 @@ private:
     VariableList mVariables;
 
     BlendingMode mBlendingMode = BlendingMode::OPAQUE;
+    BlendingMode mPostLightingBlendingMode = BlendingMode::TRANSPARENT;
     CullingMode mCullingMode = CullingMode::BACK;
     Shading mShading = Shading::LIT;
+    MaterialDomain mMaterialDomain = MaterialDomain::SURFACE;
     Interpolation mInterpolation = Interpolation::SMOOTH;
     VertexDomain mVertexDomain = VertexDomain::OBJECT;
     TransparencyMode mTransparencyMode = TransparencyMode::DEFAULT;
@@ -326,22 +398,29 @@ private:
     filament::AttributeBitset mRequiredAttributes;
 
     float mMaskThreshold = 0.4f;
+    float mSpecularAntiAliasingVariance = 0.15f;
+    float mSpecularAntiAliasingThreshold = 0.2f;
+
     bool mShadowMultiplier = false;
 
     uint8_t mParameterCount = 0;
 
     bool mDoubleSided = false;
-    bool mDoubleSidedSet = false;
+    bool mDoubleSidedCapability = false;
     bool mColorWrite = true;
     bool mDepthTest = true;
     bool mDepthWrite = true;
     bool mDepthWriteSet = false;
 
-    bool mCurvatureToRoughness = false;
-    bool mLimitOverInterpolation = false;
+    bool mSpecularAntiAliasing = false;
     bool mClearCoatIorChange = true;
 
     bool mFlipUV = true;
+
+    bool mMultiBounceAO = false;
+    bool mMultiBounceAOSet = false;
+    bool mSpecularAO = false;
+    bool mSpecularAOSet = false;
 };
 
 } // namespace filamat

@@ -26,13 +26,17 @@
 
 namespace filamat {
 
-class DictionaryTextChunk : public Chunk {
+class DictionaryTextChunk final : public Chunk {
 public:
-    DictionaryTextChunk(LineDictionary& dictionary, ChunkType chunkType);
+    DictionaryTextChunk(LineDictionary&& dictionary, ChunkType chunkType);
     ~DictionaryTextChunk() = default;
-    virtual void flatten(Flattener& f);
+
+    const LineDictionary& getDictionary() const noexcept { return mDictionary; }
+
 private:
-    LineDictionary& mDictionary;
+    void flatten(Flattener& f) override;
+
+    const LineDictionary mDictionary;
 };
 
 } // namespace filamat

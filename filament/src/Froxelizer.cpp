@@ -40,7 +40,7 @@ using namespace utils;
 
 namespace filament {
 
-using namespace driver;
+using namespace backend;
 
 namespace details {
 
@@ -151,7 +151,7 @@ void Froxelizer::setProjection(const mat4f& projection, float near, float far) n
 
 bool Froxelizer::prepare(
         FEngine::DriverApi& driverApi, ArenaScope& arena, filament::Viewport const& viewport,
-        const filament::math::mat4f& projection, float projectionNear, float projectionFar) noexcept {
+        const mat4f& projection, float projectionNear, float projectionFar) noexcept {
     setViewport(viewport);
     setProjection(projection, projectionNear, projectionFar);
 
@@ -522,7 +522,7 @@ std::pair<size_t, size_t> Froxelizer::clipToIndices(float2 const& clip) const no
 }
 
 
-void Froxelizer::commit(driver::DriverApi& driverApi) {
+void Froxelizer::commit(backend::DriverApi& driverApi) {
     // send data to GPU
     mFroxelBuffer.commit(driverApi, mFroxelBufferUser);
     mRecordsBuffer.commit(driverApi, mRecordBufferUser);

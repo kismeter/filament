@@ -27,7 +27,8 @@
 
 #include <utils/Path.h>
 
-#include <filament/driver/PixelBufferDescriptor.h>
+#include <backend/PixelBufferDescriptor.h>
+
 #include <filament/Color.h>
 #include <filament/Engine.h>
 #include <filament/LightManager.h>
@@ -374,9 +375,9 @@ static void postRender(Engine*, View* view, Scene*, Renderer* renderer) {
             int currentFrame = 0;
         };
 
-        driver::PixelBufferDescriptor buffer(pixels, vp.width * vp.height * 3,
-                driver::PixelBufferDescriptor::PixelDataFormat::RGB,
-                driver::PixelBufferDescriptor::PixelDataType::UBYTE,
+        backend::PixelBufferDescriptor buffer(pixels, vp.width * vp.height * 3,
+                backend::PixelBufferDescriptor::PixelDataFormat::RGB,
+                backend::PixelBufferDescriptor::PixelDataType::UBYTE,
                 [](void* buffer, size_t size, void* user) {
                     CaptureState* state = static_cast<CaptureState*>(user);
                     const Viewport& v = state->view->getViewport();

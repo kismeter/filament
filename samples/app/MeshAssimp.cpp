@@ -54,7 +54,7 @@
 
 #include <stb_image.h>
 
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 
 #include "generated/resources/resources.h"
 
@@ -204,14 +204,14 @@ Texture* MeshAssimp::createOneByOneTexture(uint32_t pixel) {
             .width(uint32_t(1))
             .height(uint32_t(1))
             .levels(0xff)
-            .format(driver::TextureFormat::RGBA8)
+            .format(Texture::InternalFormat::RGBA8)
             .build(mEngine);
 
     Texture::PixelBufferDescriptor defaultNormalBuffer(textureData,
             size_t(1 * 1 * 4),
             Texture::Format::RGBA,
             Texture::Type::UBYTE,
-            (driver::BufferDescriptor::Callback) &free);
+            (Texture::PixelBufferDescriptor::Callback) &free);
 
     texturePtr->setImage(mEngine, 0, std::move(defaultNormalBuffer));
     texturePtr->generateMipmaps(mEngine);
@@ -305,7 +305,7 @@ MeshAssimp::~MeshAssimp() {
 template<typename T>
 struct State {
     std::vector<T> state;
-    explicit State(std::vector<T>&& state) : state(state) { }
+    explicit State(std::vector<T>&& state) : state(std::move(state)) { }
     static void free(void* buffer, size_t size, void* user) {
         auto* const that = static_cast<State<T>*>(user);
         delete that;
@@ -324,11 +324,11 @@ static void loadTexture(Engine *engine, const std::string &filePath, Texture **m
             int w, h, n;
             int numChannels = hasAlpha ? 4 : 3;
 
-            driver::TextureFormat inputFormat;
+            Texture::InternalFormat inputFormat;
             if (sRGB) {
-                inputFormat = hasAlpha ? driver::TextureFormat::SRGB8_A8 : driver::TextureFormat::SRGB8;
+                inputFormat = hasAlpha ? Texture::InternalFormat::SRGB8_A8 : Texture::InternalFormat::SRGB8;
             } else {
-                inputFormat = hasAlpha ? driver::TextureFormat::RGBA8 : driver::TextureFormat::RGB8;
+                inputFormat = hasAlpha ? Texture::InternalFormat::RGBA8 : Texture::InternalFormat::RGB8;
             }
 
             Texture::Format outputFormat = hasAlpha ? Texture::Format::RGBA : Texture::Format::RGB;
@@ -346,7 +346,7 @@ static void loadTexture(Engine *engine, const std::string &filePath, Texture **m
                         size_t(w * h * numChannels),
                         outputFormat,
                         Texture::Type::UBYTE,
-                        (driver::BufferDescriptor::Callback) &stbi_image_free);
+                        (Texture::PixelBufferDescriptor::Callback) &stbi_image_free);
 
                 (*map)->setImage(*engine, 0, std::move(buffer));
                 (*map)->generateMipmaps(*engine);
@@ -365,11 +365,11 @@ void loadEmbeddedTexture(Engine *engine, aiTexture *embeddedTexture, Texture **m
     int w, h, n;
     int numChannels = hasAlpha ? 4 : 3;
 
-    driver::TextureFormat inputFormat;
+    Texture::InternalFormat inputFormat;
     if (sRGB) {
-        inputFormat = hasAlpha ? driver::TextureFormat::SRGB8_A8 : driver::TextureFormat::SRGB8;
+        inputFormat = hasAlpha ? Texture::InternalFormat::SRGB8_A8 : Texture::InternalFormat::SRGB8;
     } else {
-        inputFormat = hasAlpha ? driver::TextureFormat::RGBA8 : driver::TextureFormat::RGB8;
+        inputFormat = hasAlpha ? Texture::InternalFormat::RGBA8 : Texture::InternalFormat::RGB8;
     }
 
     Texture::Format outputFormat = hasAlpha ? Texture::Format::RGBA : Texture::Format::RGB;
@@ -388,7 +388,7 @@ void loadEmbeddedTexture(Engine *engine, aiTexture *embeddedTexture, Texture **m
             size_t(w * h * numChannels),
             outputFormat,
             Texture::Type::UBYTE,
-            (driver::BufferDescriptor::Callback) &free);
+            (Texture::PixelBufferDescriptor::Callback) &free);
 
     (*map)->setImage(*engine, 0, std::move(defaultBuffer));
     (*map)->generateMipmaps(*engine);

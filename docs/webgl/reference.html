@@ -210,6 +210,10 @@
 <td align="left"></td>
 </tr>
 <tr>
+<td align="left"><a href="#RenderTarget%24AttachmentPoint">RenderTarget$AttachmentPoint</a></td>
+<td align="left"></td>
+</tr>
+<tr>
 <td align="left"><a href="#RenderableManager%24PrimitiveType">RenderableManager$PrimitiveType</a></td>
 <td align="left"></td>
 </tr>
@@ -219,6 +223,10 @@
 </tr>
 <tr>
 <td align="left"><a href="#RgbaType">RgbaType</a></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left"><a href="#Texture%24CubemapFace">Texture$CubemapFace</a></td>
 <td align="left"></td>
 </tr>
 <tr>
@@ -286,6 +294,12 @@
 <li><em>returns</em> an instance of <a href="#Engine">Engine</a></li>
 </ul>
 </li>
+<li><strong>Engine.createAssetLoader(engine)</strong>
+<ul>
+<li><em>engine</em> an instance of <a href="#Engine">Engine</a></li>
+<li><em>returns</em> an instance of <a href="#AssetLoader">AssetLoader</a></li>
+</ul>
+</li>
 <li><strong>engine.createCamera()</strong>
 <ul>
 <li><em>returns</em> an instance of <a href="#Camera">Camera</a></li>
@@ -295,7 +309,7 @@
 <ul>
 <li>Utility that creates an [IndirectLight] from a KTX file.</li>
 <li><em>buffer</em> asset string, or Uint8Array, or <a href="#Buffer">Buffer</a> with KTX file contents</li>
-<li><em>options</em> Options dictionary. For now, the <code>rgbm</code> boolean is the only option.</li>
+<li><em>options</em> Options dictionary.</li>
 <li><em>returns</em> <a href="#IndirectLight">IndirectLight</a></li>
 </ul>
 </li>
@@ -319,7 +333,7 @@
 <ul>
 <li>Utility function that creates a [Skybox] from a KTX file.</li>
 <li><em>buffer</em> asset string, or Uint8Array, or <a href="#Buffer">Buffer</a> with KTX file contents</li>
-<li><em>options</em> Options dictionary. For now, the <code>rgbm</code> boolean is the only option.</li>
+<li><em>options</em> Options dictionary.</li>
 <li><em>returns</em> <a href="#Skybox">Skybox</a></li>
 </ul>
 </li>
@@ -340,7 +354,7 @@
 <ul>
 <li>Utility function that creates a [Texture] from a KTX file.</li>
 <li><em>buffer</em> asset string, or Uint8Array, or <a href="#Buffer">Buffer</a> with KTX file contents</li>
-<li><em>options</em> Options dictionary. For now, the <code>rgbm</code> boolean is the only option.</li>
+<li><em>options</em> Options dictionary.</li>
 <li><em>returns</em> <a href="#Texture">Texture</a></li>
 </ul>
 </li>
@@ -348,7 +362,7 @@
 <ul>
 <li>Creates a 2D [Texture] from the raw contents of a PNG file.</li>
 <li><em>buffer</em> asset string, or Uint8Array, or <a href="#Buffer">Buffer</a> with PNG file contents</li>
-<li><em>options</em> object with optional <code>srgb</code>, <code>rgbm</code>, <code>noalpha</code>, and <code>nomips</code> keys.</li>
+<li><em>options</em> object with optional <code>srgb</code>, <code>noalpha</code>, and <code>nomips</code> keys.</li>
 <li><em>returns</em> <a href="#Texture">Texture</a></li>
 </ul>
 </li>
@@ -391,6 +405,11 @@
 <li><strong>engine.destroyMaterial(instance)</strong>
 <ul>
 <li><em>instance</em> the <a href="#MaterialInstance">MaterialInstance</a> to destroy</li>
+</ul>
+</li>
+<li><strong>engine.destroyRenderTarget(rt)</strong>
+<ul>
+<li><em>rt</em> the <a href="#RenderTarget">RenderTarget</a> to destroy</li>
 </ul>
 </li>
 <li><strong>engine.destroyRenderer(renderer)</strong>
@@ -532,9 +551,8 @@ as quaternions.</li>
 <li><em>returns</em> string</li>
 </ul>
 </li>
-<li><strong>ktxBundle.getPixelDataFormat(rgbm)</strong>
+<li><strong>ktxBundle.getPixelDataFormat()</strong>
 <ul>
-<li><em>rgbm</em> boolean that configures the alpha channel into an HDR scale.</li>
 <li><em>returns</em> <a href="#PixelDataFormat">PixelDataFormat</a></li>
 </ul>
 </li>
@@ -567,6 +585,20 @@ wrapper rather than interacting with <code>KtxBundle</code> directly.</p>
 <div class='classdoc'>
 <h2>class <a id='KtxInfo' href='#KtxInfo'>KtxInfo</a></h2>
 <p>Property accessor for KTX header.</p>
+<ul>
+<li><strong>KtxInfo.createAssetFroBinary(buffer)</strong>
+<ul>
+<li><em>buffer</em> asset string, or Uint8Array, or <a href="#Buffer">Buffer</a></li>
+<li><em>returns</em> an instance of <a href="#FilamentAsset">FilamentAsset</a></li>
+</ul>
+</li>
+<li><strong>KtxInfo.createAssetFromJson(buffer)</strong>
+<ul>
+<li><em>buffer</em> asset string, or Uint8Array, or <a href="#Buffer">Buffer</a></li>
+<li><em>returns</em> an instance of <a href="#FilamentAsset">FilamentAsset</a></li>
+</ul>
+</li>
+</ul>
 <p>For example, <code>ktxbundle.info().pixelWidth</code>. See the
 <a href="https://www.khronos.org/opengles/sdk/tools/KTX/file_format_spec/">KTX spec</a> for the list of
 properties.</p>
@@ -975,7 +1007,6 @@ This defines the following functions:</p>
 <li>RGB_INTEGER</li>
 <li>RGBA</li>
 <li>RGBA_INTEGER</li>
-<li>RGBM</li>
 <li>DEPTH_COMPONENT</li>
 <li>DEPTH_STENCIL</li>
 <li>ALPHA</li>
@@ -992,6 +1023,13 @@ This defines the following functions:</p>
 <li>INT</li>
 <li>HALF</li>
 <li>FLOAT</li>
+</ul>
+</div>
+<div class='enumdoc'>
+<h2>enum <a id='RenderTarget$AttachmentPoint' href='#RenderTarget$AttachmentPoint'>RenderTarget$AttachmentPoint</a></h2>
+<ul>
+<li>COLOR</li>
+<li>DEPTH</li>
 </ul>
 </div>
 <div class='enumdoc'>
@@ -1017,6 +1055,17 @@ This defines the following functions:</p>
 <li>LINEAR</li>
 <li>PREMULTIPLIED_sRGB</li>
 <li>PREMULTIPLIED_LINEAR</li>
+</ul>
+</div>
+<div class='enumdoc'>
+<h2>enum <a id='Texture$CubemapFace' href='#Texture$CubemapFace'>Texture$CubemapFace</a></h2>
+<ul>
+<li>POSITIVE_X</li>
+<li>NEGATIVE_X</li>
+<li>POSITIVE_Y</li>
+<li>NEGATIVE_Y</li>
+<li>POSITIVE_Z</li>
+<li>NEGATIVE_Z</li>
 </ul>
 </div>
 <div class='enumdoc'>
@@ -1135,6 +1184,9 @@ This defines the following functions:</p>
 <li>DEFAULT</li>
 <li>COLOR_ATTACHMENT</li>
 <li>DEPTH_ATTACHMENT</li>
+<li>STENCIL_ATTACHMENT</li>
+<li>UPLOADABLE</li>
+<li>SAMPLEABLE</li>
 </ul>
 </div>
 <div class='enumdoc'>
@@ -1147,6 +1199,14 @@ This defines the following functions:</p>
 <li>UV1</li>
 <li>BONE_INDICES</li>
 <li>BONE_WEIGHTS</li>
+<li>CUSTOM0</li>
+<li>CUSTOM1</li>
+<li>CUSTOM2</li>
+<li>CUSTOM3</li>
+<li>CUSTOM4</li>
+<li>CUSTOM5</li>
+<li>CUSTOM6</li>
+<li>CUSTOM7</li>
 </ul>
 </div>
 <div class='enumdoc'>

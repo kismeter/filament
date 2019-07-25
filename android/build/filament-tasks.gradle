@@ -33,6 +33,7 @@ List<File> getBinaries(String name, File toolsPath) {
 ext.matcFullPath = getBinaries('matc', filamentToolsPath)
 ext.cmgenFullPath = getBinaries('cmgen', filamentToolsPath)
 ext.filameshFullPath = getBinaries('filamesh', filamentToolsPath)
+ext.resgenFullPath = getBinaries('resgen', filamentToolsPath)
 
 class LogOutputStream extends ByteArrayOutputStream {
     private final Logger logger;
@@ -83,6 +84,7 @@ class MaterialCompiler extends DefaultTask {
         }
 
         inputs.outOfDate { InputFileDetails outOfDate ->
+            if (outOfDate.file.directory) return
             def file = outOfDate.file
 
             def out = new LogOutputStream(logger, LogLevel.LIFECYCLE)
@@ -155,7 +157,7 @@ class IblGenerator extends DefaultTask {
                 standardOutput out
                 errorOutput err
                 executable "${cmgenPath}"
-                args('--format=rgbm', '--extract-blur=0.08', "--extract=${outputDir.absolutePath}", file)
+                args('--format=rgb32f', '--extract-blur=0.08', "--extract=${outputDir.absolutePath}", file)
             }
         }
 

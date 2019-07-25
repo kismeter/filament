@@ -43,12 +43,22 @@ Here are a few sample materials rendered with Filament:
 ![Damaged Helmet](docs/images/samples/model_damaged_helmet.jpg)
 ![Helmet](docs/images/samples/model_helmet.jpg)
 ![Brushed copper](docs/images/samples/brushed_copper_2.jpg)
-![Chess set](docs/images/samples/chess1.jpg)
 ![Material 1](docs/images/samples/material_01.jpg)
 ![Material 2](docs/images/samples/material_02.jpg)
-![Material 3](docs/images/samples/material_03.jpg)
 ![Material 6](docs/images/samples/material_06.jpg)
 ![Material 8](docs/images/samples/material_08.jpg)
+
+## Applications
+
+Here are a few screenshots of applications that use Filament in production:
+
+### Google Maps AR Navigation
+
+![Google Maps AR Navigation](docs/images/samples/app_gmm_ar_nav.jpg)
+
+### Google Search 3D/AR Viewer on Android
+
+![Google Search 3D/AR Viewer on Android](docs/images/samples/app_google_3d_viewer.jpg)
 
 ## Features
 
@@ -75,17 +85,18 @@ Here are a few sample materials rendered with Filament:
 - Metallic workflow
 - Clear coat
 - Anisotropic lighting
-- Approximated translucent (subsurface) materials (direct and indirect lighting)
+- Approximated translucent (subsurface) materials
 - Cloth shading
 - Normal mapping & ambient occlusion mapping
 - Image-based lighting
 - Physically-based camera (shutter speed, sensitivity and aperture)
 - Physical light units
 - Point light, spot light and directional light
+- SSAO
 - ACES-like tone-mapping
 - Temporal dithering
-- FXAA or MSAA
-- Dynamic resolution (on Android)
+- FXAA, MSAA and specular anti-aliasing
+- Dynamic resolution (on Android and iOS)
 
 ### Future
 
@@ -127,10 +138,12 @@ and tools.
   - `filamat`:             Material generation library
   - `filameshio`:          Tiny filamesh parsing library (see also `tools/filamesh`)
   - `geometry`:            Mesh-related utilities
-  - `gltfio`:              Loader for glTF 2.0
+  - `gltfio`:              Loader and optional pipeline for glTF 2.0
+  - `ibl`:                 IBL generation tools
   - `image`:               Image filtering and simple transforms
   - `imageio`:             Image file reading / writing, only intended for internal use
   - `math`:                Math library
+  - `rays`:                Simple path tracer used for baking ambient occlusion, etc.
   - `utils`:               Utility library (threads, memory, data structures, etc.)
 - `samples`:               Sample desktop applications
 - `shaders`:               Shaders used by `filamat` and `matc`
@@ -168,6 +181,11 @@ To build the Java based components of the project you can optionally install (re
 
 Additional dependencies may be required for your operating system. Please refer to the appropriate
 section below.
+
+Building the `rays` library (used for light baking) is optional and requires the following packages:
+
+- embree 3.0+
+- libtbb-dev
 
 To build Filament for Android you must also install the following:
 
@@ -234,10 +252,10 @@ If you use CMake directly instead of the build script, pass `-DENABLE_JAVA=OFF` 
 
 Make sure you've installed the following dependencies:
 
-- `clang-7`
+- `clang-7` or higher
 - `libglu1-mesa-dev`
-- `libc++-7-dev` (`libcxx-devel` and `libcxx-static` on Fedora)
-- `libc++abi-7-dev` (`libcxxabi-static` on Fedora)
+- `libc++-7-dev` (`libcxx-devel` and `libcxx-static` on Fedora) or higher
+- `libc++abi-7-dev` (`libcxxabi-static` on Fedora) or higher
 - `ninja-build`
 - `libxi-dev`
 
@@ -251,13 +269,6 @@ follows, with some caveats that are explained further down.
 $ mkdir out/cmake-release
 $ cd out/cmake-release
 $ cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../release/filament ../..
-```
-
-If you experience link errors you must ensure that you are using `libc++abi` by passing this
-extra parameter to `cmake`:
-
-```
--DFILAMENT_REQUIRES_CXXABI=true
 ```
 
 Your Linux distribution might default to `gcc` instead of `clang`, if that's the case invoke
@@ -705,8 +716,9 @@ filamesh ./assets/models/monkey/monkey.obj monkey.filamesh
 ```
 
 Most samples accept an IBL that must be generated using the `cmgen` tool (`./tools/filamesh/cmgen`
-in your build directory). These sample apps expect a path to a directory containing the RGBM files
-for the IBL. To generate an IBL simply use this command:
+in your build directory). These sample apps expect a path to a directory containing the '.rgb32f'
+files for the IBL (which are PNGs containing `R11F_G11F_B10F` data). To generate an IBL simply use
+this command:
 
 ```
 cmgen -x ./ibls/ my_ibl.exr
@@ -722,7 +734,7 @@ pre-filtered environment map (one file per cubemap face and per mip level), the 
 texture for the skybox and a text file containing the spherical harmonics for indirect diffuse
 lighting.
 
-If you prefer a blurred background, run `cmgen` with this flag: `--extract-blur=0.5`. The numerical
+If you prefer a blurred background, run `cmgen` with this flag: `--extract-blur=0.1`. The numerical
 value is the desired roughness between 0 and 1.
 
 ## Rendering with Filament
@@ -730,7 +742,7 @@ value is the desired roughness between 0 and 1.
 ### Native Linux, macOS and Windows
 
 You must create an `Engine`, a `Renderer` and a `SwapChain`. The `SwapChain` is created from a
-native window pointer (an `NSView` on macOS or a `HDC` on Windows for instance):
+native window pointer (an `NSView` on macOS or a `HWND` on Windows for instance):
 
 ```c++
 Engine* engine = Engine::create();

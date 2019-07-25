@@ -24,9 +24,9 @@
 
 #include "details/Allocators.h"
 
-#include "driver/DriverApiForward.h"
+#include "private/backend/DriverApiForward.h"
 
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 
 #include <utils/Log.h>
 
@@ -42,6 +42,10 @@
  */
 
 namespace filament {
+
+namespace details {
+class FEngine;
+} // namespace details
 
 namespace fg {
 struct Resource;
@@ -59,10 +63,13 @@ public:
 
     class Builder {
     public:
-        using Attachments = FrameGraphRenderTarget::Attachments;
+        using Attachments = FrameGraphRenderTarget::AttachmentResult;
 
         Builder(Builder const&) = delete;
         Builder& operator=(Builder const&) = delete;
+
+        // Return the name of the pass being built
+        const char* getPassName() const noexcept;
 
         // Create a virtual resource that can eventually turn into a concrete texture or
         // render target
@@ -71,6 +78,14 @@ public:
 
         // Read from a resource (i.e. add a reference to that resource)
         FrameGraphResource read(FrameGraphResource const& input);
+
+        FrameGraphResource::Descriptor const& getDescriptor(FrameGraphResource const& r);
+
+        // get resource's name
+        const char* getName(FrameGraphResource const& r) const noexcept;
+
+        // return resource's sample count
+        uint8_t getSamples(FrameGraphResource const& r) const noexcept;
 
         /*
          * Use this resource as a render target.
@@ -84,11 +99,11 @@ public:
 
         Attachments useRenderTarget(const char* name,
                 FrameGraphRenderTarget::Descriptor const& desc,
-                driver::TargetBufferFlags clearFlags = {}) noexcept;
+                backend::TargetBufferFlags clearFlags = {}) noexcept;
 
-        // helper for single color attachment
-        Attachments useRenderTarget(FrameGraphResource texture,
-                driver::TargetBufferFlags clearFlags = {}) noexcept;
+        // helper for single color attachment with WRITE access
+        FrameGraphResource useRenderTarget(FrameGraphResource texture,
+                backend::TargetBufferFlags clearFlags = {}) noexcept;
 
         // Declare that this pass has side effects outside the framegraph (i.e. it can't be culled)
         // Calling write() on an imported resource automatically adds a side-effect.
@@ -157,14 +172,14 @@ public:
     // Import a write-only render target from outside the framegraph and returns a handle to it.
     FrameGraphResource importResource(const char* name,
             FrameGraphRenderTarget::Descriptor descriptor,
-            Handle<HwRenderTarget> target, uint32_t width, uint32_t height,
-            driver::TargetBufferFlags discardStart = driver::TargetBufferFlags::NONE,
-            driver::TargetBufferFlags discardEnd = driver::TargetBufferFlags::NONE);
+            backend::Handle<backend::HwRenderTarget> target, uint32_t width, uint32_t height,
+            backend::TargetBufferFlags discardStart = backend::TargetBufferFlags::NONE,
+            backend::TargetBufferFlags discardEnd = backend::TargetBufferFlags::NONE);
 
     // Import a read-only render target from outside the framegraph and returns a handle to it.
     FrameGraphResource importResource(
             const char* name, FrameGraphResource::Descriptor const& descriptor,
-            Handle<HwTexture> color);
+            backend::Handle<backend::HwTexture> color);
 
 
     // Moves the resource associated to the handle 'from' to the handle 'to'. After this call,
@@ -178,10 +193,19 @@ public:
     // allocates concrete resources and culls unreferenced passes
     FrameGraph& compile() noexcept;
 
-    // execute all referenced passes
-    void execute(driver::DriverApi& driver) noexcept;
+    // execute all referenced passes and flush the command queue after each pass
+    void execute(details::FEngine& engine, backend::DriverApi& driver) noexcept;
 
-    // for debugging
+
+    /*
+     * Debugging...
+     */
+
+    // execute all referenced passes -- this version is for unit-testing, where we don't have
+    // an engine necessarily.
+    void execute(backend::DriverApi& driver) noexcept;
+
+    // print the frame graph as a graphviz file in the log
     void export_graphviz(utils::io::ostream& out);
 
 private:
@@ -211,17 +235,21 @@ private:
     fg::ResourceNode& getResource(FrameGraphResource r);
 
     fg::RenderTarget& createRenderTarget(const char* name,
-            FrameGraphRenderTarget::Descriptor const& desc, bool imported) noexcept;
+            FrameGraphRenderTarget::Descriptor const& desc) noexcept;
 
     FrameGraphResource createResourceNode(fg::Resource* resource) noexcept;
 
     enum class DiscardPhase { START, END };
-    uint8_t computeDiscardFlags(DiscardPhase phase,
+    backend::TargetBufferFlags computeDiscardFlags(DiscardPhase phase,
             fg::PassNode const* curr, fg::PassNode const* first,
             fg::RenderTarget const& renderTarget);
 
     bool equals(FrameGraphRenderTarget::Descriptor const& lhs,
             FrameGraphRenderTarget::Descriptor const& rhs) const noexcept;
+
+    void executeInternal(fg::PassNode const& node, backend::DriverApi& driver) noexcept;
+
+    void reset() noexcept;
 
     details::LinearAllocatorArena mArena;
     Vector<fg::PassNode> mPassNodes;                    // list of frame graph passes

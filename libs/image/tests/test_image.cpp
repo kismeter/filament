@@ -107,6 +107,58 @@ TEST_F(ImageTest, LuminanceFilters) { // NOLINT
     updateOrCompare(horizontalStack({grays0, grays1}), "grays.png");
 }
 
+TEST_F(ImageTest, DistanceField) { // NOLINT
+    auto tiny = createGrayFromAscii("100000 000000 001100 001100 000000 000000");
+    auto src = resampleImage(tiny, 256, 256, Filter::BOX);
+    auto presence = [] (const LinearImage& img, uint32_t col, uint32_t row, void*) {
+        return img.getPixelRef(col, row)[0] ? true : false;
+    };
+    auto cf = computeCoordField(src, presence, nullptr);
+    auto edt = edtFromCoordField(cf, true);
+
+    float maxdist = 0;
+    const uint32_t width = edt.getWidth();
+    const uint32_t height = edt.getHeight();
+    for (int32_t row = 0; row < height; ++row) {
+        float* dst = edt.getPixelRef(0, row);
+        for (uint32_t col = 0; col < width; ++col) {
+            maxdist = std::max(maxdist, dst[col]);
+        }
+    }
+    for (int32_t row = 0; row < height; ++row) {
+        float* dst = edt.getPixelRef(0, row);
+        for (uint32_t col = 0; col < width; ++col) {
+            dst[col] /= maxdist;
+        }
+    }
+    updateOrCompare(horizontalStack({src, edt}), "edt.png");
+
+    tiny = createColorFromAscii("00000 01020 00400 04000 00000");
+    src = resampleImage(tiny, 256, 256, Filter::MITCHELL);
+    for (int32_t row = 0; row < src.getHeight(); ++row) {
+        for (uint32_t col = 0; col < src.getWidth(); ++col) {
+            float& r = src.getPixelRef(col, row)[0];
+            float& g = src.getPixelRef(col, row)[1];
+            float& b = src.getPixelRef(col, row)[2];
+            bool inside = r > 0.4 || g > 0.4 || b > 0.4;
+            if (!inside) {
+                r = g = b = 0.4f;
+            }
+        }
+    }
+
+    auto isInside = [] (const LinearImage& img, uint32_t col, uint32_t row, void*) {
+        float r = img.getPixelRef(col, row)[0];
+        float g = img.getPixelRef(col, row)[1];
+        float b = img.getPixelRef(col, row)[2];
+        return !(r > 0.4 && g > 0.4 && b > 0.4);
+    };
+    cf = computeCoordField(src, isInside, nullptr);
+    auto voronoi = voronoiFromCoordField(cf, src);
+
+    updateOrCompare(horizontalStack({src, voronoi}), "voronoi.png");
+}
+
 TEST_F(ImageTest, ColorFilters) { // NOLINT
     // Test color space with a classic RED => GREEN color gradient.
     LinearImage color1 = createColorFromAscii("12");
@@ -373,6 +425,62 @@ TEST_F(ImageTest, Ktx) { // NOLINT
         val = string(bundleWithMetadata.getMetadata("foo"));
         ASSERT_EQ(val, "bar");
     }
+}
+
+TEST_F(ImageTest, getSphericalHarmonics) {
+    KtxBundle ktx(2, 1, true);
+
+    const char* sphereHarmonics = R"(0.199599 0.197587 0.208682
+    0.0894955 0.126985 0.187462
+    0.0921711 0.102497 0.105308
+    -0.0322833 -0.053886 -0.0661181
+    -0.0734081 -0.0808731 -0.0788446
+    0.0620748 0.0851526 0.100914
+    0.00763482 0.00564362 -0.000848833
+    -0.102654 -0.102815 -0.0930881
+    -0.022778 -0.0281883 -0.0377256
+    )";
+
+    ktx.setMetadata("sh", sphereHarmonics);
+
+    float3 harmonics[9];
+    ktx.getSphericalHarmonics(harmonics);
+
+    ASSERT_FLOAT_EQ(harmonics[0].x, 0.199599);
+    ASSERT_FLOAT_EQ(harmonics[0].y, 0.197587);
+    ASSERT_FLOAT_EQ(harmonics[0].z, 0.208682);
+
+    ASSERT_FLOAT_EQ(harmonics[1].x, 0.0894955);
+    ASSERT_FLOAT_EQ(harmonics[1].y, 0.126985);
+    ASSERT_FLOAT_EQ(harmonics[1].z, 0.187462);
+
+    ASSERT_FLOAT_EQ(harmonics[2].x, 0.0921711);
+    ASSERT_FLOAT_EQ(harmonics[2].y, 0.102497);
+    ASSERT_FLOAT_EQ(harmonics[2].z, 0.105308);
+
+    ASSERT_FLOAT_EQ(harmonics[3].x, -0.0322833);
+    ASSERT_FLOAT_EQ(harmonics[3].y, -0.053886);
+    ASSERT_FLOAT_EQ(harmonics[3].z, -0.0661181);
+
+    ASSERT_FLOAT_EQ(harmonics[4].x, -0.0734081);
+    ASSERT_FLOAT_EQ(harmonics[4].y, -0.0808731);
+    ASSERT_FLOAT_EQ(harmonics[4].z, -0.0788446);
+
+    ASSERT_FLOAT_EQ(harmonics[5].x, 0.0620748);
+    ASSERT_FLOAT_EQ(harmonics[5].y, 0.0851526);
+    ASSERT_FLOAT_EQ(harmonics[5].z, 0.100914);
+
+    ASSERT_FLOAT_EQ(harmonics[6].x, 0.00763482);
+    ASSERT_FLOAT_EQ(harmonics[6].y, 0.00564362);
+    ASSERT_FLOAT_EQ(harmonics[6].z, -0.000848833);
+
+    ASSERT_FLOAT_EQ(harmonics[7].x, -0.102654);
+    ASSERT_FLOAT_EQ(harmonics[7].y, -0.102815);
+    ASSERT_FLOAT_EQ(harmonics[7].z, -0.0930881);
+
+    ASSERT_FLOAT_EQ(harmonics[8].x, -0.022778);
+    ASSERT_FLOAT_EQ(harmonics[8].y, -0.0281883);
+    ASSERT_FLOAT_EQ(harmonics[8].z, -0.0377256);
 }
 
 static void printUsage(const char* name) {

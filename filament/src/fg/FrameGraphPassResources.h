@@ -19,9 +19,8 @@
 
 #include "FrameGraphResource.h"
 
-#include <filament/driver/DriverEnums.h>
-
-#include "driver/Handle.h"
+#include <backend/DriverEnums.h>
+#include <backend/Handle.h>
 
 namespace filament {
 
@@ -35,13 +34,16 @@ class FrameGraphPassResources {
 public:
 
     struct RenderTargetInfo {
-        Handle<HwRenderTarget> target;
-        driver::RenderPassParams params;
+        backend::Handle<backend::HwRenderTarget> target;
+        backend::RenderPassParams params;
     };
 
-    Handle <HwTexture> getTexture(FrameGraphResource r) const noexcept;
+    // Return the name of the pass being executed
+    const char* getPassName() const noexcept;
 
-    RenderTargetInfo getRenderTarget(FrameGraphResource r) const noexcept;
+    backend::Handle<backend::HwTexture> getTexture(FrameGraphResource r) const noexcept;
+
+    RenderTargetInfo getRenderTarget(FrameGraphResource r, uint8_t level = 0) const noexcept;
 
     FrameGraphResource::Descriptor const& getDescriptor(FrameGraphResource r) const noexcept;
 

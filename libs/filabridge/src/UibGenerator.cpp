@@ -19,11 +19,11 @@
 #include "private/filament/UniformInterfaceBlock.h"
 
 #include <private/filament/EngineEnums.h>
-#include <filament/driver/DriverEnums.h>
+#include <backend/DriverEnums.h>
 
 namespace filament {
 
-using namespace driver;
+using namespace backend;
 
 static_assert(sizeof(PerRenderableUib) % 256 == 0,
         "sizeof(Transform) should be a multiple of 256");
@@ -73,6 +73,11 @@ UniformInterfaceBlock const& UibGenerator::getPerViewUib() noexcept  {
             .add("iblSH",                   9, UniformInterfaceBlock::Type::FLOAT3)
             // user time
             .add("userTime",                1, UniformInterfaceBlock::Type::FLOAT4)
+            // ibl max mip level
+            .add("iblMaxMipLevel",          1, UniformInterfaceBlock::Type::FLOAT2)
+            .add("padding10",               1, UniformInterfaceBlock::Type::FLOAT2)
+            // bring size to 1 KiB
+            .add("padding1",                16, UniformInterfaceBlock::Type::FLOAT4)
             .build();
     return uib;
 }
@@ -97,9 +102,9 @@ UniformInterfaceBlock const& UibGenerator::getLightsUib() noexcept {
 UniformInterfaceBlock const& UibGenerator::getPostProcessingUib() noexcept {
     static UniformInterfaceBlock uib =  UniformInterfaceBlock::Builder()
             .name("PostProcessUniforms")
-            .add("uvScale", 1, UniformInterfaceBlock::Type::FLOAT2)
-            .add("time",    1, UniformInterfaceBlock::Type::FLOAT)
-            .add("yOffset", 1, UniformInterfaceBlock::Type::FLOAT)
+            .add("uvScale",   1, UniformInterfaceBlock::Type::FLOAT2)
+            .add("time",      1, UniformInterfaceBlock::Type::FLOAT)
+            .add("dithering", 1, UniformInterfaceBlock::Type::INT)
             .build();
     return uib;
 }

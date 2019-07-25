@@ -8,7 +8,7 @@ compileMesh {
     group 'Filament'
     description 'Compile mesh'
 
-    inputFile = file("../../../../third_party/shader_ball/shader_ball.obj")
+    inputFile = file("../../../../third_party/models/shader_ball/shader_ball.obj")
     outputDir = file("src/main/assets/models")
 }
 
@@ -26,7 +26,7 @@ preBuild.dependsOn generateIbl
 android {
     compileSdkVersion 28
     defaultConfig {
-        applicationId "com.google.android.filament.ibl"
+        applicationId "com.google.android.filament.material_builder"
         minSdkVersion 21
         targetSdkVersion 28
         versionCode 1

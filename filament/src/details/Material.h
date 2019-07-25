@@ -73,20 +73,22 @@ public:
 
     FEngine& getEngine() const noexcept  { return mEngine; }
 
-    Handle<HwProgram> getProgramSlow(uint8_t variantKey) const noexcept;
-    Handle<HwProgram> getProgram(uint8_t variantKey) const noexcept {
-
-        // filterVariant() has already been applied in generateCommands(), shouldn't be needed here
-        assert( variantKey == Variant::filterVariant(variantKey, isVariantLit()) );
-
-        Handle<HwProgram> const entry = mCachedPrograms[variantKey];
+    backend::Handle<backend::HwProgram> getProgramSlow(uint8_t variantKey) const noexcept;
+    backend::Handle<backend::HwProgram> getSurfaceProgramSlow(uint8_t variantKey) const noexcept;
+    backend::Handle<backend::HwProgram> getPostProcessProgramSlow(uint8_t variantKey) const noexcept;
+    backend::Handle<backend::HwProgram> getProgram(uint8_t variantKey) const noexcept {
+        backend::Handle<backend::HwProgram> const entry = mCachedPrograms[variantKey];
         return UTILS_LIKELY(entry) ? entry : getProgramSlow(variantKey);
     }
+    backend::Program getProgramBuilderWithVariants(uint8_t variantKey, uint8_t vertexVariantKey,
+            uint8_t fragmentVariantKey) const noexcept;
+    backend::Handle<backend::HwProgram> createAndCacheProgram(backend::Program&& p,
+            uint8_t variantKey) const noexcept;
 
     bool isVariantLit() const noexcept { return mIsVariantLit; }
 
     const utils::CString& getName() const noexcept { return mName; }
-    Driver::RasterState getRasterState() const noexcept  { return mRasterState; }
+    backend::RasterState getRasterState() const noexcept  { return mRasterState; }
     uint32_t getId() const noexcept { return mMaterialId; }
 
     Shading getShading() const noexcept { return mShading; }
@@ -94,17 +96,23 @@ public:
     BlendingMode getBlendingMode() const noexcept { return mBlendingMode; }
     BlendingMode getRenderBlendingMode() const noexcept { return mRenderBlendingMode; }
     VertexDomain getVertexDomain() const noexcept { return mVertexDomain; }
+    MaterialDomain getMaterialDomain() const noexcept { return mMaterialDomain; }
     CullingMode getCullingMode() const noexcept { return mCullingMode; }
     TransparencyMode getTransparencyMode() const noexcept { return mTransparencyMode; }
     bool isColorWriteEnabled() const noexcept { return mRasterState.colorWrite; }
     bool isDepthWriteEnabled() const noexcept { return mRasterState.depthWrite; }
     bool isDepthCullingEnabled() const noexcept {
-        return mRasterState.depthFunc != Driver::RasterState::DepthFunc::A;
+        return mRasterState.depthFunc != backend::RasterState::DepthFunc::A;
     }
     bool isDoubleSided() const noexcept { return mDoubleSided; }
+    bool hasDoubleSidedCapability() const noexcept { return mDoubleSidedCapability; }
     float getMaskThreshold() const noexcept { return mMaskThreshold; }
     bool hasShadowMultiplier() const noexcept { return mHasShadowMultiplier; }
     AttributeBitset getRequiredAttributes() const noexcept { return mRequiredAttributes; }
+
+    bool hasSpecularAntiAliasing() const noexcept { return mSpecularAntiAliasing; }
+    float getSpecularAntiAliasingVariance() const noexcept { return mSpecularAntiAliasingVariance; }
+    float getSpecularAntiAliasingThreshold() const noexcept { return mSpecularAntiAliasingThreshold; }
 
     size_t getParameterCount() const noexcept {
         return mUniformInterfaceBlock.getUniformInfoList().size() +
@@ -116,9 +124,9 @@ public:
 
 private:
     // try to order by frequency of use
-    mutable std::array<Handle<HwProgram>, VARIANT_COUNT> mCachedPrograms;
+    mutable std::array<backend::Handle<backend::HwProgram>, VARIANT_COUNT> mCachedPrograms;
 
-    Driver::RasterState mRasterState;
+    backend::RasterState mRasterState;
     BlendingMode mRenderBlendingMode;
     TransparencyMode mTransparencyMode;
     bool mIsVariantLit;
@@ -127,13 +135,20 @@ private:
     BlendingMode mBlendingMode;
     Interpolation mInterpolation;
     VertexDomain mVertexDomain;
+    MaterialDomain mMaterialDomain;
     CullingMode mCullingMode;
     AttributeBitset mRequiredAttributes;
-    float mMaskThreshold;
+
+    float mMaskThreshold = 0.4f;
+    float mSpecularAntiAliasingVariance;
+    float mSpecularAntiAliasingThreshold;
+
     bool mDoubleSided;
+    bool mDoubleSidedCapability = false;
     bool mHasShadowMultiplier = false;
     bool mHasCustomDepthShader = false;
     bool mIsDefaultMaterial = false;
+    bool mSpecularAntiAliasing = false;
 
     FMaterialInstance mDefaultInstance;
     SamplerInterfaceBlock mSamplerInterfaceBlock;

@@ -23,6 +23,9 @@
 
 #include <utils/Panic.h>
 
+#include <backend/DriverEnums.h>
+#include <filament/IndirectLight.h>
+
 #define IBL_INTEGRATION_PREFILTERED_CUBEMAP         0
 #define IBL_INTEGRATION_IMPORTANCE_SAMPLING         1
 #define IBL_INTEGRATION                             IBL_INTEGRATION_PREFILTERED_CUBEMAP
@@ -38,10 +41,9 @@ using namespace details;
 struct IndirectLight::BuilderDetails {
     Texture const* mReflectionsMap = nullptr;
     Texture const* mIrradianceMap = nullptr;
-    filament::math::float3 mIrradianceCoefs[9] = {};
-    mat3f mRotation;
+    float3 mIrradianceCoefs[9] = {};
+    mat3f mRotation = {};
     float mIntensity = 30000.0f;
-    uint8_t mNumBands = 0;
 };
 
 using BuilderType = IndirectLight;
@@ -57,14 +59,33 @@ IndirectLight::Builder& IndirectLight::Builder::reflections(Texture const* cubem
     return *this;
 }
 
-IndirectLight::Builder& IndirectLight::Builder::irradiance(uint8_t bands, filament::math::float3 const* sh) noexcept {
+IndirectLight::Builder& IndirectLight::Builder::irradiance(uint8_t bands, float3 const* sh) noexcept {
     // clamp to 3 bands for now
     bands = std::min(bands, uint8_t(3));
     size_t numCoefs = bands * bands;
     std::fill(std::begin(mImpl->mIrradianceCoefs), std::end(mImpl->mIrradianceCoefs), 0.0f);
     std::copy_n(sh, numCoefs, std::begin(mImpl->mIrradianceCoefs));
-    mImpl->mNumBands = bands;
     return *this;
+}
+
+IndirectLight::Builder& IndirectLight::Builder::radiance(uint8_t bands, float3 const* sh) noexcept {
+    float3 irradiance[9];
+    if (bands >= 1) {
+        irradiance[0] = sh[0] * 0.282095f;
+        if (bands >= 2) {
+            irradiance[1] = sh[1] * -0.325735f;
+            irradiance[2] = sh[2] *  0.325735f;
+            irradiance[3] = sh[3] * -0.325735f;
+            if (bands >= 3) {
+                irradiance[4] = sh[4] *  0.273137f;
+                irradiance[5] = sh[5] * -0.273137f;
+                irradiance[6] = sh[6] *  0.078848f;
+                irradiance[7] = sh[7] * -0.273137f;
+                irradiance[8] = sh[8] *  0.136569f;
+            }
+        }
+    }
+    return this->irradiance(bands, irradiance);
 }
 
 IndirectLight::Builder& IndirectLight::Builder::irradiance(Texture const* cubemap) noexcept {
@@ -77,7 +98,7 @@ IndirectLight::Builder& IndirectLight::Builder::intensity(float envIntensity) no
     return *this;
 }
 
-IndirectLight::Builder& IndirectLight::Builder::rotation(filament::math::mat3f const& rotation) noexcept {
+IndirectLight::Builder& IndirectLight::Builder::rotation(mat3f const& rotation) noexcept {
     mImpl->mRotation = rotation;
     return *this;
 }
@@ -90,19 +111,13 @@ IndirectLight* IndirectLight::Builder::build(Engine& engine) {
             return nullptr;
         }
 
-        if (!ASSERT_POSTCONDITION_NON_FATAL( mImpl->mReflectionsMap->isRgbm(),
-                "reflection map must have RGBM enabled")) {
-            return nullptr;
-        }
-
-        if (!ASSERT_POSTCONDITION_NON_FATAL(mImpl->mReflectionsMap->getLevels() == 9 ||
-                mImpl->mReflectionsMap->getLevels() == 1,
-                "reflection map must be 256x256 and have 9 mipmap levels")) {
+        if (!ASSERT_POSTCONDITION_NON_FATAL(mImpl->mReflectionsMap->getLevels() ==
+                upcast(mImpl->mReflectionsMap)->getMaxLevelCount(),
+                "reflection map must have %u mipmap levels",
+                upcast(mImpl->mReflectionsMap)->getMaxLevelCount())) {
             return nullptr;
         }
         if (IBL_INTEGRATION == IBL_INTEGRATION_IMPORTANCE_SAMPLING) {
-            // FIXME: this doesn't work because IBLs are encoded as RGBM with a gamma of 0.5
-            // this produces mipmap levels that are too dark
             mImpl->mReflectionsMap->generateMipmaps(engine);
         }
     }
@@ -123,9 +138,9 @@ IndirectLight* IndirectLight::Builder::build(Engine& engine) {
 namespace details {
 
 FIndirectLight::FIndirectLight(FEngine& engine, const Builder& builder) noexcept {
-
     if (builder->mReflectionsMap) {
         mReflectionsMapHandle = upcast(builder->mReflectionsMap)->getHwHandle();
+        mMaxMipLevel = builder->mReflectionsMap->getLevels();
     }
 
     std::copy(
@@ -133,6 +148,7 @@ FIndirectLight::FIndirectLight(FEngine& engine, const Builder& builder) noexcept
             std::end(builder->mIrradianceCoefs),
             mIrradianceCoefs.begin());
 
+    mRotation = builder->mRotation;
     mIntensity = builder->mIntensity;
     if (builder->mIrradianceMap) {
         mIrradianceMapHandle = upcast(builder->mIrradianceMap)->getHwHandle();
@@ -164,8 +180,13 @@ float IndirectLight::getIntensity() const noexcept {
     return upcast(this)->getIntensity();
 }
 
-void IndirectLight::setRotation(filament::math::mat3f const& rotation) noexcept {
+void IndirectLight::setRotation(mat3f const& rotation) noexcept {
     upcast(this)->setRotation(rotation);
 }
+
+const math::mat3f& IndirectLight::getRotation() const noexcept {
+    return upcast(this)->getRotation();
+}
+
 
 } // namespace filament

@@ -19,10 +19,9 @@
 
 #include "upcast.h"
 
-#include "driver/Driver.h"
-#include "driver/Handle.h"
+#include <backend/DriverEnums.h>
+#include <backend/Handle.h>
 
-#include <private/filament/EngineEnums.h>
 #include <filament/VertexBuffer.h>
 
 #include <utils/bitset.h>
@@ -43,7 +42,7 @@ public:
     // frees driver resources, object becomes invalid
     void terminate(FEngine& engine);
 
-    Handle<HwVertexBuffer> getHwHandle() const noexcept { return mHandle; }
+    backend::Handle<backend::HwVertexBuffer> getHwHandle() const noexcept { return mHandle; }
 
     size_t getVertexCount() const noexcept;
 
@@ -53,17 +52,17 @@ public:
 
     // no-op if bufferIndex out of range
     void setBufferAt(FEngine& engine, uint8_t bufferIndex,
-            driver::BufferDescriptor&& buffer, uint32_t byteOffset = 0);
+            backend::BufferDescriptor&& buffer, uint32_t byteOffset = 0);
 
 private:
     friend class VertexBuffer;
 
-    struct AttributeData : Driver::Attribute {
-        AttributeData() : Driver::Attribute{ .type = Driver::ElementType::FLOAT4 } {}
+    struct AttributeData : backend::Attribute {
+        AttributeData() : backend::Attribute{ .type = backend::ElementType::FLOAT4 } {}
     };
 
-    Handle<HwVertexBuffer> mHandle;
-    std::array<AttributeData, MAX_ATTRIBUTE_BUFFERS_COUNT> mAttributes;
+    backend::Handle<backend::HwVertexBuffer> mHandle;
+    std::array<AttributeData, backend::MAX_VERTEX_ATTRIBUTE_COUNT> mAttributes;
     AttributeBitset mDeclaredAttributes;
     uint32_t mVertexCount = 0;
     uint8_t mBufferCount = 0;
